@@ -1,0 +1,115 @@
+# # dvc.yaml — Ember Energy Forecasting Pipeline Stages
+# # Run the full pipeline:  dvc repro
+# # Run one stage:          dvc repro eda
+# # Visualise DAG:          dvc dag
+
+# stages:
+
+#   # ── Stage 1: EDA ────────────────────────────────────────────────────────────
+#   eda:
+#     cmd: python src/01_eda.py
+#       --csv        ${data.raw_csv}
+#       --output_dir ${paths.eda}
+#     deps:
+#       - src/01_eda.py
+#       - ${data.raw_csv}
+#     params:
+#       - data
+#       - countries
+#     outs:
+#       - ${paths.eda}/ember_filtered.csv
+#       - ${paths.eda}/table01_eda_statistics.csv
+#     plots:
+#       - ${paths.eda}/figures:
+#           cache: false
+
+#   # ── Stage 2: Preprocessing ──────────────────────────────────────────────────
+#   preprocessing:
+#     cmd: python src/02_preprocessing.py
+#       --input_dir  ${paths.eda}
+#       --output_dir ${paths.preprocessing}
+#       --train_until ${splits.train_end}
+#     deps:
+#       - src/02_preprocessing.py
+#       - ${paths.eda}/ember_filtered.csv
+#     params:
+#       - splits
+#       - features
+#     outs:
+#       - ${paths.preprocessing}/ember_model_ready.csv
+#       - ${paths.preprocessing}/feature_meta.json
+
+#   # ── Stage 3: Modeling ───────────────────────────────────────────────────────
+#   modeling:
+#     cmd: python src/03_modeling.py
+#       --input_dir  ${paths.preprocessing}
+#       --output_dir ${paths.modeling}
+#     deps:
+#       - src/03_modeling.py
+#       - ${paths.preprocessing}/ember_model_ready.csv
+#       - ${paths.preprocessing}/feature_meta.json
+#     params:
+#       - splits
+#       - modeling
+#     outs:
+#       - ${paths.modeling}/test_benchmarking.csv
+#       - ${paths.modeling}/best_models.csv
+#       - ${paths.modeling}/best_hp.json
+#       - ${paths.modeling}/ember_config.json
+#     metrics:
+#       - ${paths.modeling}/metrics.json:
+#           cache: false
+
+#   # ── Stage 4: Forecasting ────────────────────────────────────────────────────
+#   forecasting:
+#     cmd: python src/04_forecasting.py
+#       --pre_dir        ${paths.preprocessing}
+#       --model_dir      ${paths.modeling}
+#       --output_dir     ${paths.forecasting}
+#       --forecast_until ${splits.forecast_end}
+#     deps:
+#       - src/04_forecasting.py
+#       - ${paths.preprocessing}/ember_model_ready.csv
+#       - ${paths.modeling}/best_models.csv
+#       - ${paths.modeling}/best_hp.json
+#       - ${paths.modeling}/ember_config.json
+#     params:
+#       - splits
+#     outs:
+#       - ${paths.forecasting}/demand_forecast_2025_2030.csv
+#       - ${paths.forecasting}/demand_growth_summary.csv
+#     metrics:
+#       - ${paths.forecasting}/forecast_metrics.json:
+#           cache: false
+#     plots:
+#       - ${paths.forecasting}/figures:
+#           cache: false
+
+#   # ── Stage 5: Deep Learning ──────────────────────────────────────────────────
+#   deeplearning:
+#     cmd: python src/05_deeplearning.py
+#       --pre_dir    ${paths.preprocessing}
+#       --output_dir ${paths.deeplearning}
+#       --epochs     ${deeplearning.epochs}
+#       --patience   ${deeplearning.patience}
+#       --seq_len    ${deeplearning.seq_len}
+#       --batch_size ${deeplearning.batch_size}
+#     deps:
+#       - src/05_deeplearning.py
+#       - ${paths.preprocessing}/ember_model_ready.csv
+#       - ${paths.preprocessing}/feature_meta.json
+#     params:
+#       - splits
+#       - deeplearning
+#     outs:
+#       - ${paths.deeplearning}/dl_benchmarking.csv
+#       - ${paths.deeplearning}/dl_best_models.csv
+#       - ${paths.deeplearning}/dl_wf_predictions.csv
+#       - ${paths.deeplearning}/dl_forecast_2025_2030.csv
+#       - ${paths.deeplearning}/dl_summary.json
+#     metrics:
+#       - ${paths.deeplearning}/dl_metrics.json:
+#           cache: false
+#     plots:
+#       - ${paths.deeplearning}/figures:
+#           cache: false

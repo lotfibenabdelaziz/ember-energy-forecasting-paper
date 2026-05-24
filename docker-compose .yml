@@ -1,0 +1,110 @@
+# docker-compose.yml — Ember Energy Forecasting
+# Services: pipeline, api, mlflow
+# Dev profile: jupyter
+
+name: ember-energy
+
+x-common-env: &common-env
+  OUTPUTS_DIR:          outputs
+  MLFLOW_TRACKING_URI:  http://mlflow:5000
+  TRAIN_UNTIL:          ${TRAIN_UNTIL:-2019}
+  FORECAST_UNTIL:       ${FORECAST_UNTIL:-2025}
+
+services:
+
+  # ── Pipeline (one-shot job) ───────────────────────────────────────────────
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ember-energy-pipeline:latest
+    volumes:
+      - ./data:/app/data:ro
+      - ./outputs:/app/outputs
+      - ./params.yaml:/app/params.yaml:ro
+      - pipeline-cache:/app/.cache
+    environment:
+      <<: *common-env
+      CSV_PATH: /app/${CSV_PATH:-data/raw/yearly_full_release_long_format.csv}
+    command:
+      - --csv
+      - /app/${CSV_PATH:-data/raw/yearly_full_release_long_format.csv}
+      - --train_until
+      - "${TRAIN_UNTIL:-2019}"
+      - --forecast_until
+      - "${FORECAST_UNTIL:-2025}"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    restart: "no"
+
+  # ── FastAPI ───────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: ember-energy-api:latest
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - ./outputs:/app/outputs:ro
+    environment:
+      PORT:        "${PORT:-8000}"
+      ENV:         "${ENV:-production}"
+      OUTPUT_ROOT: outputs
+    depends_on:
+      - pipeline
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ── MLflow ────────────────────────────────────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.12.1
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    volumes:
+      - ./mlruns:/mlruns
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      - --backend-store-uri=/mlruns
+      - --default-artifact-root=/mlruns/artifacts
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Jupyter Lab (dev only) ────────────────────────────────────────────────
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ember-energy-pipeline:latest
+    profiles: [dev]
+    ports:
+      - "8888:8888"
+    volumes:
+      - .:/app
+    environment:
+      <<: *common-env
+    entrypoint: ["jupyter", "lab"]
+    command:
+      - --ip=0.0.0.0
+      - --port=8888
+      - --no-browser
+      - --NotebookApp.token=''
+    restart: unless-stopped
+
+volumes:
+  pipeline-cache:
+    driver: local

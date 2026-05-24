@@ -1,0 +1,64 @@
+# Environment variables (never commit)
+.env
+
+# Kubernetes secrets (never commit real values)
+k8s/secret.yaml
+
+# Data (large files — store in DVC or share separately)
+data/
+
+notebooks/
+
+
+# Pipeline outputs (auto-generated — never commit)
+outputs/
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# DVC in-progress (not ready yet)
+.dvc.yaml
+.dvc_params.yaml
+.makefile_dvc_block.mk
+# DVC runtime/cache
+.dvc/tmp/
+.dvc/cache/
+tmp/
+cache/

@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ember-api
+  namespace: ember-pipeline
+  labels:
+    app: ember-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ember-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: ember-api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/YOUR_ORG/ember-energy-api:latest    # ← update
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+
+          envFrom:
+            - configMapRef:
+                name: ember-config
+            - secretRef:
+                name: ember-secrets
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+
+          volumeMounts:
+            - name: outputs
+              mountPath: /app/outputs
+              readOnly: true
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+
+      volumes:
+        - name: outputs
+          persistentVolumeClaim:
+            claimName: ember-outputs-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ember-api-service
+  namespace: ember-pipeline
+spec:
+  selector:
+    app: ember-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: ClusterIP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ember-api-ingress
+  namespace: ember-pipeline
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: ember-api.your-domain.com       # ← update
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ember-api-service
+                port:
+                  number: 80

@@ -1,0 +1,691 @@
+"""
+api/main.py — Ember Energy Forecasting REST API
+================================================
+Serves all pipeline outputs as JSON endpoints.
+
+Splits  : Train 2000-2016 | Val 2017-2020 | Test 2021-2024 | Forecast 2025-2030
+Countries: Tunisia · Austria · Germany · Egypt · Canada · France · Kuwait
+
+Public endpoints  (no auth required):
+    GET  /health                      — liveness check
+    GET  /countries                   — list of 7 countries
+    POST /auth/login                  — obtain JWT token
+    GET  /docs                        — Swagger UI
+    GET  /redoc                       — ReDoc
+
+Protected endpoints (Bearer JWT required):
+    GET  /forecast/{country}          — classical forecast 2025-2030 + CI
+    GET  /forecast/dl/{country}       — deep learning forecast 2025-2030
+    GET  /metrics/{country}           — classical model test metrics
+    GET  /metrics/dl/{country}        — deep learning test metrics
+    GET  /models/{country}            — best model (classical + DL)
+    GET  /growth/{country}            — CAGR + growth summary
+    GET  /compare/{country}           — classical vs DL side by side
+    GET  /figures                     — list all pipeline figures
+    GET  /figures/{filename}          — serve a figure file
+    POST /auth/logout                 — revoke current token
+    GET  /auth/me                     — current user info
+    POST /ask                         — LangChain Q&A (rate limited)
+
+Run locally:
+    uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+"""
+
+import logging
+import math
+import os
+from datetime import timedelta
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from api.auth import (
+    _admin_password,
+    _admin_username,
+    _token_expire_minutes,
+    bearer_scheme,
+    create_access_token,
+    get_current_user,
+    rate_limit,
+    require_api_key,
+    revoke_token,
+    decode_token,
+)
+
+load_dotenv()
+
+log = logging.getLogger(__name__)
+
+# ── Output paths ──────────────────────────────────────────────────────────────
+_ROOT = Path(os.getenv("OUTPUT_ROOT", os.getenv("OUTPUTS_DIR", "outputs")))
+
+FORECAST_CSV     = _ROOT / "forecasting"   / "demand_forecast_2025_2030.csv"
+METRICS_CSV      = _ROOT / "forecasting"   / "forecast_metrics.csv"
+GROWTH_CSV       = _ROOT / "forecasting"   / "demand_growth_summary.csv"
+BEST_MODELS_CSV  = _ROOT / "modeling"      / "best_models.csv"
+BENCHMARKING_CSV = _ROOT / "modeling"      / "test_benchmarking.csv"
+DL_FORECAST_CSV  = _ROOT / "deeplearning"  / "dl_forecast_2025_2030.csv"
+DL_METRICS_CSV   = _ROOT / "deeplearning"  / "dl_benchmarking.csv"
+DL_BEST_CSV      = _ROOT / "deeplearning"  / "dl_best_models.csv"
+
+FIGURES_DIRS = [
+    _ROOT / "eda"          / "figures",
+    _ROOT / "preprocessing" / "figures",
+    _ROOT / "modeling"     / "figures",
+    _ROOT / "forecasting"  / "figures",
+    _ROOT / "deeplearning" / "figures",
+]
+
+COUNTRIES = [
+    "Tunisia", "Austria", "Germany",
+    "Egypt",   "Canada",  "France", "Kuwait",
+]
+
+# ── Data loader ───────────────────────────────────────────────────────────────
+
+def _load(path: Path, label: str) -> pd.DataFrame:
+    if not path.exists():
+        log.warning("%s not found at %s", label, path)
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
+
+def _load_all() -> dict[str, pd.DataFrame]:
+    return {
+        "forecast":    _load(FORECAST_CSV,     "forecast"),
+        "metrics":     _load(METRICS_CSV,      "metrics"),
+        "growth":      _load(GROWTH_CSV,       "growth"),
+        "best_models": _load(BEST_MODELS_CSV,  "best_models"),
+        "benchmark":   _load(BENCHMARKING_CSV, "benchmark"),
+        "dl_forecast": _load(DL_FORECAST_CSV,  "dl_forecast"),
+        "dl_metrics":  _load(DL_METRICS_CSV,   "dl_metrics"),
+        "dl_best":     _load(DL_BEST_CSV,      "dl_best"),
+    }
+
+
+_DATA: dict[str, pd.DataFrame] = _load_all()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FastAPI app
+# ═══════════════════════════════════════════════════════════════════════════════
+
+app = FastAPI(
+    title       = "Ember Energy Forecasting API",
+    description = (
+        "REST API for per-country electricity demand forecasts (2025-2030) "
+        "based on the Ember annual energy dataset. IEEE Paper.\n\n"
+        "**Authentication:** POST `/auth/login` → copy `access_token` → "
+        "click 🔒 Authorize → paste `Bearer <token>`"
+    ),
+    version  = "1.0.0",
+    docs_url = "/docs",
+    redoc_url= "/redoc",
+)
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:8000,http://localhost:3000,http://127.0.0.1:8000",
+).split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins     = ALLOWED_ORIGINS,
+    allow_methods     = ["GET", "POST"],
+    allow_headers     = ["Authorization", "X-API-Key", "Content-Type"],
+    allow_credentials = True,
+    max_age           = 600,
+)
+
+# ── Security headers ──────────────────────────────────────────────────────────
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"]        = "DENY"
+        response.headers["X-XSS-Protection"]       = "1; mode=block"
+        response.headers["Referrer-Policy"]        = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com "
+            "https://fonts.googleapis.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com "
+            "https://fonts.gstatic.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data:; "
+            "connect-src 'self';"
+        )
+        if os.getenv("ENV") == "production":
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+# ── Static files ──────────────────────────────────────────────────────────────
+_static = Path(__file__).parent / "static"
+if _static.exists():
+    app.mount("/static", StaticFiles(directory=str(_static)), name="static")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pydantic schemas
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type:   str = "bearer"
+    expires_in:   int = 3600          # seconds
+
+class AskRequest(BaseModel):
+    question: str
+
+class AskResponse(BaseModel):
+    question: str
+    answer:   str
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Internal helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _validate_country(country: str) -> str:
+    match = next((c for c in COUNTRIES if c.lower() == country.lower()), None)
+    if match is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Country '{country}' not found. Available: {COUNTRIES}",
+        )
+    return match
+
+
+def _require(df: pd.DataFrame, label: str) -> pd.DataFrame:
+    if df.empty:
+        raise HTTPException(
+            status_code=503,
+            detail=f"{label} not available — run the pipeline first.",
+        )
+    return df
+
+
+def _is_finite(v: Any) -> bool:
+    try:
+        return math.isfinite(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
+def _metrics_dict(row: pd.Series) -> dict[str, Any]:
+    return {
+        k: round(float(v), 4)
+        for k, v in row.items()
+        if k not in ("Country", "Model") and _is_finite(v)
+    }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Global exception handler — never leak stack traces
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    log.error("Unhandled exception: %s %s — %s", request.method, request.url, exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PUBLIC endpoints — no auth required
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/", include_in_schema=False)
+def root():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/index.html")
+
+
+@app.get("/health", tags=["system"])
+def health() -> dict:
+    """Liveness check — returns API status and which output files are loaded."""
+    return {
+        "status":  "ok",
+        "outputs": {k: not v.empty for k, v in _DATA.items()},
+    }
+
+
+@app.get("/countries", tags=["meta"])
+def get_countries() -> dict:
+    """Return the list of 7 countries covered by the forecasts."""
+    return {"countries": COUNTRIES}
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+@app.post("/auth/login", tags=["auth"], response_model=TokenResponse)
+def login(body: LoginRequest, request: Request) -> TokenResponse:
+    """
+    Exchange username + password for a JWT Bearer token.
+    Set ADMIN_USERNAME and ADMIN_PASSWORD in .env before use.
+    """
+    # Rate-limit login attempts
+    rate_limit(request)
+
+    pwd = _admin_password()
+    if not pwd:
+        raise HTTPException(
+            status_code=503,
+            detail="Auth not configured — set ADMIN_PASSWORD in .env",
+        )
+    if body.username != _admin_username() or body.password != pwd:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+        )
+
+    expire_mins = _token_expire_minutes()
+    token = create_access_token(
+        data={"sub": body.username, "role": "admin"},
+        expires_delta=timedelta(minutes=expire_mins),
+    )
+    return TokenResponse(
+        access_token=token,
+        expires_in=expire_mins * 60,
+    )
+
+
+@app.post("/auth/logout", tags=["auth"],
+          dependencies=[Depends(get_current_user)])
+def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+) -> dict:
+    """Revoke the current JWT token."""
+    if credentials:
+        revoke_token(credentials.credentials)
+    return {"message": "Logged out successfully"}
+
+
+@app.get("/auth/me", tags=["auth"],
+         dependencies=[Depends(get_current_user)])
+def me(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+) -> dict:
+    """Return current authenticated user info."""
+    user = decode_token(credentials.credentials)
+    return {"username": user.get("sub"), "role": user.get("role")}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROTECTED endpoints — Bearer JWT required
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Classical forecast ────────────────────────────────────────────────────────
+
+@app.get("/forecast/{country}", tags=["forecast"],
+         dependencies=[Depends(get_current_user)])
+def get_forecast(country: str) -> dict:
+    """Classical ML demand forecast (2025-2030) + 90% Bootstrap CI."""
+    country = _validate_country(country)
+    df      = _require(_DATA["forecast"], "Forecast")
+
+    sub = df[df["Country"] == country]
+    if sub.empty:
+        raise HTTPException(404, f"No forecast data for {country}")
+
+    if "Model" in sub.columns and not _DATA["best_models"].empty:
+        bm  = _DATA["best_models"]
+        row = bm[bm["Country"] == country]
+        if not row.empty:
+            sub = sub[sub["Model"] == row.iloc[0]["Model"]]
+
+    sub    = sub.sort_values("Year")
+    result: dict[str, Any] = {
+        "country":        country,
+        "model":          sub["Model"].iloc[0] if "Model" in sub.columns else "unknown",
+        "forecast_years": sub["Year"].tolist(),
+        "forecast_twh":   [round(v, 3) for v in sub["Forecast"].tolist()],
+    }
+    if "Lower_90" in sub.columns:
+        result["lower_90"] = [round(v, 3) for v in sub["Lower_90"].tolist()]
+        result["upper_90"] = [round(v, 3) for v in sub["Upper_90"].tolist()]
+    return result
+
+
+# ── Deep learning forecast ────────────────────────────────────────────────────
+
+@app.get("/forecast/dl/{country}", tags=["forecast"],
+         dependencies=[Depends(get_current_user)])
+def get_dl_forecast(country: str) -> dict:
+    """Deep learning demand forecast (2025-2030)."""
+    country = _validate_country(country)
+    df      = _require(_DATA["dl_forecast"], "DL Forecast")
+
+    sub = df[df["Country"] == country].sort_values("Year")
+    if sub.empty:
+        raise HTTPException(404, f"No DL forecast data for {country}")
+
+    return {
+        "country":        country,
+        "model":          sub["Model"].iloc[0] if "Model" in sub.columns else "dl",
+        "forecast_years": sub["Year"].tolist(),
+        "forecast_twh":   [round(v, 3) for v in sub["Forecast"].tolist()],
+    }
+
+
+# ── Classical metrics ─────────────────────────────────────────────────────────
+
+@app.get("/metrics/{country}", tags=["metrics"],
+         dependencies=[Depends(get_current_user)])
+def get_metrics(country: str) -> dict:
+    """Classical model test-set metrics (MAE, RMSE, MAPE, SMAPE, R², TheilU)."""
+    country = _validate_country(country)
+    df      = _require(_DATA["metrics"], "Metrics")
+
+    if "Country" not in df.columns:
+        df = df.reset_index()
+    if "Country" not in df.columns:
+        raise HTTPException(503, "Metrics CSV has no Country column")
+
+    sub = df[df["Country"] == country]
+    if sub.empty:
+        raise HTTPException(404, f"No metrics for {country}")
+
+    return {
+        "country": country,
+        "model":   sub["Model"].iloc[0] if "Model" in sub.columns else "unknown",
+        "metrics": _metrics_dict(sub.iloc[0]),
+    }
+
+
+# ── Deep learning metrics ─────────────────────────────────────────────────────
+
+@app.get("/metrics/dl/{country}", tags=["metrics"],
+         dependencies=[Depends(get_current_user)])
+def get_dl_metrics(country: str) -> dict:
+    """Deep learning test-set metrics for the best model."""
+    country = _validate_country(country)
+    df      = _require(_DATA["dl_metrics"], "DL Metrics")
+
+    sub = df[df["Country"] == country]
+    if sub.empty:
+        raise HTTPException(404, f"No DL metrics for {country}")
+
+    if "MAPE" in sub.columns:
+        valid = sub.dropna(subset=["MAPE"])
+        if not valid.empty:
+            sub = valid.loc[[valid["MAPE"].idxmin()]]
+
+    return {
+        "country": country,
+        "model":   sub["Model"].iloc[0] if "Model" in sub.columns else "dl",
+        "metrics": _metrics_dict(sub.iloc[0]),
+    }
+
+
+# ── Best models ───────────────────────────────────────────────────────────────
+
+@app.get("/models/{country}", tags=["meta"],
+         dependencies=[Depends(get_current_user)])
+def get_best_models(country: str) -> dict:
+    """Return the best classical and DL model for a country."""
+    country = _validate_country(country)
+    result: dict[str, Any] = {"country": country}
+
+    if not _DATA["best_models"].empty:
+        row = _DATA["best_models"]
+        row = row[row["Country"] == country]
+        if not row.empty:
+            result["classical_model"] = row.iloc[0]["Model"]
+            if "MAPE" in row.columns:
+                result["classical_mape"] = round(float(row.iloc[0]["MAPE"]), 4)
+
+    if not _DATA["dl_best"].empty:
+        row = _DATA["dl_best"]
+        row = row[row["Country"] == country]
+        if not row.empty:
+            result["dl_model"] = row.iloc[0]["Model"]
+            if "MAPE" in row.columns:
+                result["dl_mape"] = round(float(row.iloc[0]["MAPE"]), 4)
+
+    if len(result) == 1:
+        raise HTTPException(404, f"No model data for {country}")
+    return result
+
+
+# ── Growth summary ────────────────────────────────────────────────────────────
+
+@app.get("/growth/{country}", tags=["forecast"],
+         dependencies=[Depends(get_current_user)])
+def get_growth(country: str) -> dict:
+    """CAGR and total growth summary (2024 → 2030)."""
+    country = _validate_country(country)
+    df      = _require(_DATA["growth"], "Growth summary")
+
+    sub = df[df["Country"] == country]
+    if sub.empty:
+        raise HTTPException(404, f"No growth data for {country}")
+
+    row = sub.iloc[0].to_dict()
+    return {
+        "country": country,
+        "summary": {
+            k: (round(float(v), 4) if _is_finite(v) else v)
+            for k, v in row.items() if k != "Country"
+        },
+    }
+
+
+# ── Compare classical vs DL ───────────────────────────────────────────────────
+
+@app.get("/compare/{country}", tags=["forecast"],
+         dependencies=[Depends(get_current_user)])
+def compare_forecasts(country: str) -> dict:
+    """Side-by-side comparison of classical and DL forecasts + metrics."""
+    country = _validate_country(country)
+    result: dict[str, Any] = {"country": country}
+
+    if not _DATA["forecast"].empty:
+        sub = _DATA["forecast"][_DATA["forecast"]["Country"] == country]
+        if not sub.empty:
+            if "Model" in sub.columns and not _DATA["best_models"].empty:
+                bm  = _DATA["best_models"]
+                row = bm[bm["Country"] == country]
+                if not row.empty:
+                    sub = sub[sub["Model"] == row.iloc[0]["Model"]]
+            sub = sub.sort_values("Year")
+            result["classical"] = {
+                "model":          sub["Model"].iloc[0] if "Model" in sub.columns else "unknown",
+                "forecast_years": sub["Year"].tolist(),
+                "forecast_twh":   [round(v, 3) for v in sub["Forecast"].tolist()],
+            }
+
+    if not _DATA["dl_forecast"].empty:
+        sub = _DATA["dl_forecast"][_DATA["dl_forecast"]["Country"] == country].sort_values("Year")
+        if not sub.empty:
+            result["deeplearning"] = {
+                "model":          sub["Model"].iloc[0] if "Model" in sub.columns else "dl",
+                "forecast_years": sub["Year"].tolist(),
+                "forecast_twh":   [round(v, 3) for v in sub["Forecast"].tolist()],
+            }
+
+    metrics_cmp: dict[str, Any] = {}
+    if not _DATA["metrics"].empty:
+        df = _DATA["metrics"]
+        if "Country" not in df.columns:
+            df = df.reset_index()
+        sub = df[df["Country"] == country]
+        if not sub.empty:
+            metrics_cmp["classical"] = _metrics_dict(sub.iloc[0])
+
+    if not _DATA["dl_metrics"].empty:
+        sub = _DATA["dl_metrics"][_DATA["dl_metrics"]["Country"] == country]
+        if not sub.empty:
+            if "MAPE" in sub.columns:
+                valid = sub.dropna(subset=["MAPE"])
+                if not valid.empty:
+                    sub = valid.loc[[valid["MAPE"].idxmin()]]
+            metrics_cmp["deeplearning"] = _metrics_dict(sub.iloc[0])
+
+    if metrics_cmp:
+        result["metrics"] = metrics_cmp
+
+    if len(result) == 1:
+        raise HTTPException(404, f"No comparison data for {country}")
+    return result
+
+
+# ── Figures ───────────────────────────────────────────────────────────────────
+
+@app.get("/figures", tags=["figures"],
+         dependencies=[Depends(get_current_user)])
+def list_figures() -> dict:
+    """List all available figure files across all pipeline steps."""
+    figures = []
+    for fig_dir in FIGURES_DIRS:
+        if fig_dir.exists():
+            for f in sorted(fig_dir.iterdir()):
+                if f.suffix.lower() in {".png", ".pdf", ".svg", ".html"}:
+                    figures.append({
+                        "filename": f.name,
+                        "step":     fig_dir.parent.name,
+                        "path":     str(f.relative_to(_ROOT)),
+                    })
+    return {"figures": figures, "total": len(figures)}
+
+
+@app.get("/figures/{filename}", tags=["figures"],
+         dependencies=[Depends(get_current_user)])
+def get_figure(filename: str) -> FileResponse:
+    """Serve a figure file (PNG / PDF / SVG / HTML)."""
+    for fig_dir in FIGURES_DIRS:
+        candidate = fig_dir / filename
+        if candidate.exists():
+            media = {
+                ".png":  "image/png",
+                ".pdf":  "application/pdf",
+                ".svg":  "image/svg+xml",
+                ".html": "text/html",
+            }.get(candidate.suffix.lower(), "application/octet-stream")
+            return FileResponse(str(candidate), media_type=media)
+    raise HTTPException(404, f"Figure '{filename}' not found")
+
+
+# ── LangChain Q&A ─────────────────────────────────────────────────────────────
+
+@app.post("/ask", tags=["ai"], response_model=AskResponse,
+          dependencies=[Depends(get_current_user), Depends(rate_limit)])
+def ask(body: AskRequest) -> AskResponse:
+    """
+    Natural language Q&A over forecast data.
+    Uses LangChain + OpenAI when OPENAI_API_KEY is set,
+    falls back to a rule-based engine otherwise.
+    """
+    question = body.question.strip()
+    if not question:
+        return AskResponse(question=question, answer="Please provide a question.")
+
+    key = os.getenv("OPENAI_API_KEY", "")
+    if key and not key.startswith("sk-..."):
+        try:
+            return AskResponse(question=question, answer=_langchain_answer(question))
+        except Exception as e:
+            log.warning("LangChain failed: %s", e)
+
+    return AskResponse(question=question, answer=_rule_based_answer(question))
+
+
+def _build_context() -> str:
+    lines = ["Ember Energy Forecasting — Summary\n"]
+    if not _DATA["forecast"].empty:
+        for country in COUNTRIES:
+            sub = _DATA["forecast"][_DATA["forecast"]["Country"] == country].sort_values("Year")
+            if not sub.empty:
+                lines.append(
+                    f"{country}: {sub['Year'].iloc[0]}={round(sub['Forecast'].iloc[0],2)} TWh"
+                    f" → {sub['Year'].iloc[-1]}={round(sub['Forecast'].iloc[-1],2)} TWh"
+                )
+    if not _DATA["growth"].empty:
+        for country in COUNTRIES:
+            sub = _DATA["growth"][_DATA["growth"]["Country"] == country]
+            if not sub.empty and "CAGR (%)" in sub.columns:
+                lines.append(f"{country}: CAGR={round(float(sub.iloc[0]['CAGR (%)']),2)}%")
+    return "\n".join(lines)
+
+
+def _langchain_answer(question: str) -> str:
+    from langchain.schema import HumanMessage, SystemMessage
+    from langchain_openai import ChatOpenAI
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    return llm.invoke([
+        SystemMessage(content=(
+            "You are an energy analyst. Answer using only this data:\n\n"
+            + _build_context()
+        )),
+        HumanMessage(content=question),
+    ]).content
+
+
+def _rule_based_answer(question: str) -> str:
+    q = question.lower()
+
+    if any(w in q for w in ["highest", "largest", "most", "biggest"]):
+        if not _DATA["forecast"].empty:
+            avg = _DATA["forecast"].groupby("Country")["Forecast"].mean()
+            top = avg.idxmax()
+            return f"{top} has the highest average demand at {round(avg[top],1)} TWh (2025-2030)."
+
+    if any(w in q for w in ["growth", "cagr", "growing", "fastest"]):
+        if not _DATA["growth"].empty:
+            df = _DATA["growth"].copy()
+            if "CAGR (%)" in df.columns:
+                df["CAGR (%)"] = pd.to_numeric(df["CAGR (%)"], errors="coerce")
+                row = df.loc[df["CAGR (%)"].idxmax()]
+                return (
+                    f"{row['Country']} has the highest CAGR at "
+                    f"{round(float(row['CAGR (%)']),2)}% (2024-2030)."
+                )
+
+    for country in COUNTRIES:
+        if country.lower() in q:
+            if not _DATA["forecast"].empty:
+                sub = _DATA["forecast"][
+                    _DATA["forecast"]["Country"] == country
+                ].sort_values("Year")
+                if not sub.empty:
+                    return (
+                        f"{country} demand forecast: "
+                        + ", ".join(
+                            f"{y}: {round(v,1)} TWh"
+                            for y, v in zip(sub["Year"], sub["Forecast"])
+                        )
+                    )
+
+    return (
+        f"I can answer questions about electricity demand forecasts for "
+        f"{', '.join(COUNTRIES)} from 2025 to 2030. "
+        "Try asking about a specific country, growth rates, or comparisons."
+    )
+
+
+# ── Dev entry point ───────────────────────────────────────────────────────────
+
+def start() -> None:
+    import uvicorn
+    uvicorn.run(
+        "api.main:app",
+        host   = "0.0.0.0",
+        port   = int(os.getenv("PORT", 8000)),
+        reload = os.getenv("ENV", "production") == "development",
+    )
+
+
+if __name__ == "__main__":
+    start()

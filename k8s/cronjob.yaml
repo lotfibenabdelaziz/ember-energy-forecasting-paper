@@ -1,0 +1,82 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ember-pipeline-scheduled
+  namespace: ember-pipeline
+  labels:
+    app: ember-energy-forecasting
+    component: cronjob
+spec:
+  # Run every Monday at 02:00 UTC
+  schedule: "0 2 * * 1"
+
+  # Keep last 2 successful and 1 failed Job history
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 1
+
+  # Skip run if previous is still running
+  concurrencyPolicy: Forbid
+
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 7200
+
+      template:
+        metadata:
+          labels:
+            app: ember-pipeline
+            component: cronjob
+        spec:
+          restartPolicy: Never
+
+          imagePullSecrets:
+            - name: ember-registry-secret
+
+          containers:
+            - name: pipeline
+              image: ghcr.io/your-org/ember-energy-pipeline:latest  # ← update
+              imagePullPolicy: Always
+
+              command:
+                - python
+                - pipeline.py
+              args:
+                - "--csv"
+                - "/app/data/ember_yearly_full_release_long_format.csv"
+                - "--train_until"
+                - "$(TRAIN_UNTIL)"
+                - "--forecast_until"
+                - "$(FORECAST_UNTIL)"
+
+              envFrom:
+                - configMapRef:
+                    name: ember-pipeline-config
+
+              env:
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+
+              resources:
+                requests:
+                  memory: "2Gi"
+                  cpu:    "1000m"
+                limits:
+                  memory: "6Gi"
+                  cpu:    "4000m"
+
+              volumeMounts:
+                - name: data-volume
+                  mountPath: /app/data
+                  readOnly: true
+                - name: outputs-volume
+                  mountPath: /app/outputs
+
+          volumes:
+            - name: data-volume
+              persistentVolumeClaim:
+                claimName: ember-data-pvc
+                readOnly: true
+            - name: outputs-volume
+              persistentVolumeClaim:
+                claimName: ember-outputs-pvc

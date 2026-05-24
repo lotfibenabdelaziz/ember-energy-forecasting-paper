@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ember Energy — Demand Forecasting</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;800&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <!-- Chart.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0a0c10;
+      --bg2:       #111318;
+      --bg3:       #181c24;
+      --border:    rgba(255,255,255,.07);
+      --border2:   rgba(255,255,255,.12);
+      --text:      #e8eaf0;
+      --muted:     #6b7280;
+      --accent:    #3b9eff;
+      --accent2:   #00d4a0;
+      --accent3:   #ff6b35;
+      --warn:      #f59e0b;
+      --font-head: 'Syne', sans-serif;
+      --font-body: 'Inter', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+      --radius:    10px;
+      --radius-lg: 16px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* ── Scrollbar ───────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+    /* ── Layout ──────────────────────────────────────────────── */
+    .layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+
+    /* ── Sidebar ─────────────────────────────────────────────── */
+    .sidebar {
+      background: var(--bg2);
+      border-right: 1px solid var(--border);
+      padding: 28px 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .logo {
+      padding: 0 20px 28px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+
+    .logo-mark {
+      font-family: var(--font-head);
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -.02em;
+      color: var(--text);
+    }
+
+    .logo-mark span { color: var(--accent); }
+
+    .logo-sub {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    .nav-section {
+      padding: 0 12px;
+      margin-bottom: 8px;
+    }
+
+    .nav-label {
+      font-size: 10px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 0 8px;
+      margin-bottom: 4px;
+    }
+
+    .nav-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      background: none;
+      border: none;
+      border-radius: var(--radius);
+      color: var(--muted);
+      font-family: var(--font-body);
+      font-size: 13px;
+      cursor: pointer;
+      transition: all .15s;
+      text-align: left;
+    }
+
+    .nav-btn:hover { background: var(--bg3); color: var(--text); }
+    .nav-btn.active { background: rgba(59,158,255,.12); color: var(--accent); }
+
+    .nav-icon {
+      width: 16px;
+      height: 16px;
+      opacity: .7;
+      flex-shrink: 0;
+    }
+
+    .country-section { padding: 0 12px; margin-top: auto; border-top: 1px solid var(--border); padding-top: 20px; }
+
+    .country-select {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 13px;
+      padding: 9px 12px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+    }
+
+    .country-select:focus { outline: none; border-color: var(--accent); }
+
+    /* ── Main ────────────────────────────────────────────────── */
+    .main { padding: 32px 36px; overflow-y: auto; }
+
+    /* ── Page header ─────────────────────────────────────────── */
+    .page-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .page-title {
+      font-family: var(--font-head);
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -.03em;
+      color: var(--text);
+    }
+
+    .page-title span { color: var(--accent); }
+
+    .page-meta {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .status-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+    .pill {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-family: var(--font-mono);
+    }
+
+    .pill-green { background: rgba(0,212,160,.12); color: var(--accent2); border: 1px solid rgba(0,212,160,.2); }
+    .pill-blue  { background: rgba(59,158,255,.12); color: var(--accent);  border: 1px solid rgba(59,158,255,.2); }
+    .pill-amber { background: rgba(245,158,11,.12); color: var(--warn);    border: 1px solid rgba(245,158,11,.2); }
+
+    /* ── Stat cards ──────────────────────────────────────────── */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .stat-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .2s;
+    }
+
+    .stat-card:hover { border-color: var(--border2); }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--accent-line, var(--accent));
+      opacity: .6;
+    }
+
+    .stat-label { font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+    .stat-val   { font-family: var(--font-head); font-size: 28px; font-weight: 800; margin: 6px 0 2px; letter-spacing: -.03em; }
+    .stat-sub   { font-size: 11px; color: var(--muted); }
+
+    .stat-up   { color: var(--accent2); }
+    .stat-down { color: var(--accent3); }
+
+    /* ── Section ─────────────────────────────────────────────── */
+    .section { margin-bottom: 28px; }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .section-title {
+      font-family: var(--font-head);
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -.01em;
+    }
+
+    .section-hint { font-size: 11px; color: var(--muted); }
+
+    /* ── Chart card ──────────────────────────────────────────── */
+    .chart-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px 22px;
+    }
+
+    .chart-legend {
+      display: flex;
+      gap: 18px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .leg-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .leg-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+    .chart-wrap { position: relative; height: 260px; }
+
+    /* ── Two-col grid ────────────────────────────────────────── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+    /* ── Metrics table ───────────────────────────────────────── */
+    .metrics-table { width: 100%; border-collapse: collapse; }
+    .metrics-table th {
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: left;
+      padding: 0 0 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .metrics-table td {
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .metrics-table tr:last-child td { border-bottom: none; }
+    .metrics-table .model-name { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+    .metrics-table .num { font-family: var(--font-mono); font-size: 12px; }
+    .best-row { background: rgba(59,158,255,.04); }
+
+    /* ── Forecast table ──────────────────────────────────────── */
+    .forecast-table { width: 100%; border-collapse: collapse; }
+    .forecast-table th {
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: right;
+      padding: 0 0 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .forecast-table th:first-child { text-align: left; }
+    .forecast-table td {
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      text-align: right;
+      font-family: var(--font-mono);
+    }
+    .forecast-table td:first-child { text-align: left; font-family: var(--font-body); color: var(--muted); }
+    .forecast-table tr:last-child td { border-bottom: none; }
+
+    /* ── Ask bar ─────────────────────────────────────────────── */
+    .ask-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .ask-input {
+      flex: 1;
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 13px;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      transition: border-color .2s;
+    }
+
+    .ask-input:focus { outline: none; border-color: var(--accent); }
+    .ask-input::placeholder { color: var(--muted); }
+
+    .ask-btn {
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      font-family: var(--font-head);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 20px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: opacity .15s;
+      white-space: nowrap;
+    }
+
+    .ask-btn:hover { opacity: .85; }
+    .ask-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    .ask-answer {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      font-size: 13px;
+      line-height: 1.7;
+      min-height: 50px;
+      color: var(--text);
+      display: none;
+    }
+
+    /* ── API explorer ────────────────────────────────────────── */
+    .endpoint-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 6px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      transition: border-color .15s;
+      cursor: pointer;
+    }
+
+    .endpoint-row:hover { border-color: var(--border2); }
+
+    .method-badge {
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    .get-badge  { background: rgba(0,212,160,.15); color: var(--accent2); }
+    .post-badge { background: rgba(245,158,11,.15); color: var(--warn); }
+
+    .endpoint-path { color: var(--text); flex: 1; }
+    .endpoint-desc { color: var(--muted); font-size: 11px; font-family: var(--font-body); }
+
+    /* ── Error / loading state ────────────────────────────────── */
+    .state-msg {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+      padding: 20px;
+      font-family: var(--font-mono);
+    }
+
+    .error-msg { color: var(--accent3); }
+
+    /* ── Page sections (hidden/shown) ────────────────────────── */
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* ── Animations ──────────────────────────────────────────── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .fade-up { animation: fadeUp .25s ease forwards; }
+
+    /* ── Responsive ──────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; padding: 16px; }
+      .country-section { margin-top: 0; border-top: none; padding-top: 0; }
+      .main { padding: 20px 16px; }
+      .two-col { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-mark">ember<span>.</span>forecast</div>
+      <div class="logo-sub">IEEE Energy Research</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Dashboard</div>
+      <button class="nav-btn active" onclick="showPage('overview', this)">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+          <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+        Overview
+      </button>
+      <button class="nav-btn" onclick="showPage('forecast', this)">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        Forecast
+      </button>
+      <button class="nav-btn" onclick="showPage('compare', this)">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
+          <line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+        Model comparison
+      </button>
+      <button class="nav-btn" onclick="showPage('ask', this)">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+        </svg>
+        Ask AI
+      </button>
+      <button class="nav-btn" onclick="showPage('api', this)">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+        </svg>
+        API explorer
+      </button>
+    </div>
+
+    <div class="country-section">
+      <div class="nav-label" style="margin-bottom:8px">Country</div>
+      <select class="country-select" id="countrySelect" onchange="onCountryChange()">
+        <option value="Tunisia">Tunisia</option>
+        <option value="Austria">Austria</option>
+        <option value="Germany">Germany</option>
+        <option value="Egypt">Egypt</option>
+        <option value="Canada">Canada</option>
+        <option value="France">France</option>
+        <option value="Kuwait">Kuwait</option>
+      </select>
+    </div>
+  </aside>
+
+  <!-- ── Main ─────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- ── OVERVIEW PAGE ──────────────────────────────────────── -->
+    <div id="page-overview" class="page active">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Overview — <span id="ov-country">Tunisia</span></div>
+          <div class="page-meta">Electricity demand forecast · Ember dataset · Train 2000–2016 · Forecast 2025–2030</div>
+        </div>
+        <div class="status-row">
+          <span class="pill pill-green" id="api-status">● connecting…</span>
+          <span class="pill pill-blue">IEEE Paper</span>
+          <span class="pill pill-amber">v1.0.0</span>
+        </div>
+      </div>
+
+      <div class="stat-grid" id="stat-cards">
+        <div class="stat-card" style="--accent-line:var(--accent)">
+          <div class="stat-label">2025 forecast</div>
+          <div class="stat-val" id="s-2025">—</div>
+          <div class="stat-sub">TWh (classical)</div>
+        </div>
+        <div class="stat-card" style="--accent-line:var(--accent2)">
+          <div class="stat-label">2030 forecast</div>
+          <div class="stat-val" id="s-2030">—</div>
+          <div class="stat-sub">TWh (classical)</div>
+        </div>
+        <div class="stat-card" style="--accent-line:var(--warn)">
+          <div class="stat-label">CAGR 2024→2030</div>
+          <div class="stat-val stat-up" id="s-cagr">—</div>
+          <div class="stat-sub">compound annual growth</div>
+        </div>
+        <div class="stat-card" style="--accent-line:var(--accent3)">
+          <div class="stat-label">Total growth</div>
+          <div class="stat-val stat-up" id="s-growth">—</div>
+          <div class="stat-sub">2024 base → 2030</div>
+        </div>
+        <div class="stat-card" style="--accent-line:var(--accent)">
+          <div class="stat-label">Best classical</div>
+          <div class="stat-val" style="font-size:18px" id="s-bmodel">—</div>
+          <div class="stat-sub" id="s-bmape">MAPE —</div>
+        </div>
+        <div class="stat-card" style="--accent-line:var(--accent2)">
+          <div class="stat-label">Best DL model</div>
+          <div class="stat-val" style="font-size:18px" id="s-dlmodel">—</div>
+          <div class="stat-sub" id="s-dlmape">MAPE —</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">Demand forecast 2025–2030</span>
+          <span class="section-hint">Classical · DL · 90% CI</span>
+        </div>
+        <div class="chart-card">
+          <div class="chart-legend">
+            <div class="leg-item"><div class="leg-dot" style="background:#3b9eff"></div>Classical</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#00d4a0"></div>Deep learning</div>
+            <div class="leg-item"><div class="leg-dot" style="background:rgba(59,158,255,.25);width:18px"></div>90% CI</div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="ovForecastChart" role="img" aria-label="Demand forecast line chart 2025 to 2030">Loading…</canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── FORECAST PAGE ──────────────────────────────────────── -->
+    <div id="page-forecast" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Forecast — <span id="fc-country">Tunisia</span></div>
+          <div class="page-meta">Point estimates + 90% Bootstrap confidence interval</div>
+        </div>
+      </div>
+
+      <div class="two-col" style="margin-bottom:28px">
+        <div class="section">
+          <div class="section-head">
+            <span class="section-title">Classical model</span>
+            <span class="section-hint pill pill-blue" id="fc-cmodel">—</span>
+          </div>
+          <div class="chart-card">
+            <div class="chart-wrap">
+              <canvas id="fcClassicChart" role="img" aria-label="Classical model forecast chart">Loading…</canvas>
+            </div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-head">
+            <span class="section-title">Deep learning</span>
+            <span class="section-hint pill pill-green" id="fc-dlmodel">—</span>
+          </div>
+          <div class="chart-card">
+            <div class="chart-wrap">
+              <canvas id="fcDLChart" role="img" aria-label="Deep learning forecast chart">Loading…</canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">Year-by-year forecast table</span>
+        </div>
+        <div class="chart-card">
+          <table class="forecast-table">
+            <thead>
+              <tr>
+                <th>Year</th>
+                <th>Classical (TWh)</th>
+                <th>DL (TWh)</th>
+                <th>Lower 90%</th>
+                <th>Upper 90%</th>
+              </tr>
+            </thead>
+            <tbody id="forecast-tbody">
+              <tr><td colspan="5" class="state-msg">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── COMPARE PAGE ───────────────────────────────────────── -->
+    <div id="page-compare" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Model comparison — <span id="cmp-country">Tunisia</span></div>
+          <div class="page-meta">Test set walk-forward evaluation · 2021–2024</div>
+        </div>
+      </div>
+
+      <div class="two-col" style="margin-bottom:28px">
+        <div class="chart-card">
+          <div class="section-head" style="margin-bottom:12px">
+            <span class="section-title">Classical models</span>
+          </div>
+          <table class="metrics-table" id="classic-metrics-table">
+            <thead>
+              <tr><th>Model</th><th>MAE</th><th>RMSE</th><th>MAPE%</th><th>R²</th></tr>
+            </thead>
+            <tbody><tr><td colspan="5" class="state-msg">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="chart-card">
+          <div class="section-head" style="margin-bottom:12px">
+            <span class="section-title">Deep learning models</span>
+          </div>
+          <table class="metrics-table" id="dl-metrics-table">
+            <thead>
+              <tr><th>Model</th><th>MAE</th><th>RMSE</th><th>MAPE%</th><th>R²</th></tr>
+            </thead>
+            <tbody><tr><td colspan="5" class="state-msg">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">MAPE comparison — classical vs deep learning</span>
+        </div>
+        <div class="chart-card">
+          <div class="chart-legend">
+            <div class="leg-item"><div class="leg-dot" style="background:#3b9eff"></div>Classical</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#00d4a0"></div>Deep learning</div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="compareBarChart" role="img" aria-label="Bar chart comparing model MAPE values">Loading…</canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── ASK PAGE ───────────────────────────────────────────── -->
+    <div id="page-ask" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Ask AI</div>
+          <div class="page-meta">LangChain + OpenAI · answers from forecast data</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="ask-bar">
+          <input class="ask-input" id="ask-input" type="text"
+            placeholder="Which country has the highest CAGR? What is Tunisia's 2030 forecast?"
+            onkeydown="if(event.key==='Enter') sendQuestion()" />
+          <button class="ask-btn" id="ask-btn" onclick="sendQuestion()">Ask →</button>
+        </div>
+        <div class="ask-answer" id="ask-answer"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><span class="section-title">Example questions</span></div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          <button class="endpoint-row" style="display:inline-flex"
+            onclick="fillQuestion(this)">Which country has the highest demand in 2030?</button>
+          <button class="endpoint-row" style="display:inline-flex"
+            onclick="fillQuestion(this)">What is Germany's forecast for 2027?</button>
+          <button class="endpoint-row" style="display:inline-flex"
+            onclick="fillQuestion(this)">Which country grows fastest?</button>
+          <button class="endpoint-row" style="display:inline-flex"
+            onclick="fillQuestion(this)">Compare Tunisia and Egypt forecasts</button>
+          <button class="endpoint-row" style="display:inline-flex"
+            onclick="fillQuestion(this)">What is the CAGR for Kuwait?</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── API PAGE ───────────────────────────────────────────── -->
+    <div id="page-api" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">API explorer</div>
+          <div class="page-meta">Base URL: <span style="font-family:var(--font-mono);color:var(--accent)" id="api-base-url">http://localhost:8000</span></div>
+        </div>
+        <div class="status-row">
+          <span class="pill pill-green">Swagger UI → /docs</span>
+          <span class="pill pill-blue">ReDoc → /redoc</span>
+        </div>
+      </div>
+
+      <div class="section" id="endpoint-list"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── Scripts ───────────────────────────────────────────────────── -->
+<script>
+  /* ── Config ──────────────────────────────────────────────────── */
+  const API_BASE = 'http://localhost:8000';
+  const YEARS    = [2025,2026,2027,2028,2029,2030];
+
+  /* ── State ───────────────────────────────────────────────────── */
+  let currentCountry = 'Tunisia';
+  let charts = {};
+
+  /* ── Chart defaults ──────────────────────────────────────────── */
+  Chart.defaults.color          = '#6b7280';
+  Chart.defaults.borderColor    = 'rgba(255,255,255,.06)';
+  Chart.defaults.font.family    = "'DM Mono', monospace";
+  Chart.defaults.font.size      = 11;
+
+  /* ── Utilities ───────────────────────────────────────────────── */
+  function fmt(v, d=2){ return v==null||isNaN(v) ? '—' : Number(v).toFixed(d); }
+  function fmtPct(v){ return v==null||isNaN(v) ? '—' : Number(v).toFixed(1)+'%'; }
+
+  function destroyChart(id){
+    if(charts[id]){ charts[id].destroy(); delete charts[id]; }
+  }
+
+  /* ── API calls ───────────────────────────────────────────────── */
+  async function apiFetch(path){
+    const r = await fetch(API_BASE + path);
+    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
+  }
+
+  /* ── Health check ────────────────────────────────────────────── */
+  async function checkHealth(){
+    try {
+      const d = await apiFetch('/health');
+      const el = document.getElementById('api-status');
+      if(d.status === 'ok'){
+        el.textContent = '● online';
+        el.className = 'pill pill-green';
+      }
+    } catch(e) {
+      const el = document.getElementById('api-status');
+      el.textContent = '● offline';
+      el.className = 'pill';
+      el.style.background = 'rgba(255,107,53,.12)';
+      el.style.color = 'var(--accent3)';
+      el.style.border = '1px solid rgba(255,107,53,.2)';
+    }
+  }
+
+  /* ── Navigation ──────────────────────────────────────────────── */
+  function showPage(name, btn){
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('page-'+name).classList.add('active');
+    btn.classList.add('active');
+    loadPage(name);
+  }
+
+  function onCountryChange(){
+    currentCountry = document.getElementById('countrySelect').value;
+    const activePage = document.querySelector('.page.active').id.replace('page-','');
+    updateCountryLabels(currentCountry);
+    loadPage(activePage);
+  }
+
+  function updateCountryLabels(c){
+    ['ov-country','fc-country','cmp-country'].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.textContent = c;
+    });
+  }
+
+  /* ── Page loader ─────────────────────────────────────────────── */
+  function loadPage(name){
+    if(name === 'overview')  loadOverview();
+    if(name === 'forecast')  loadForecast();
+    if(name === 'compare')   loadCompare();
+    if(name === 'api')       renderApiPage();
+  }
+
+  /* ── OVERVIEW ────────────────────────────────────────────────── */
+  async function loadOverview(){
+    const c = currentCountry;
+    try {
+      const [fc, gr, bm] = await Promise.all([
+        apiFetch('/forecast/'+c),
+        apiFetch('/growth/'+c),
+        apiFetch('/models/'+c),
+      ]);
+
+      /* stat cards */
+      document.getElementById('s-2025').textContent  = fmt(fc.forecast_twh[0],1);
+      document.getElementById('s-2030').textContent  = fmt(fc.forecast_twh[5],1);
+
+      const s = gr.summary;
+      document.getElementById('s-cagr').textContent  = fmtPct(s['CAGR (%)'] ?? s.cagr);
+      const base = s['2024 TWh'] ?? s['base_twh'];
+      const end  = s['2030 TWh (forecast)'] ?? fc.forecast_twh[5];
+      const growth = base ? ((end-base)/base*100) : null;
+      document.getElementById('s-growth').textContent = fmtPct(growth);
+
+      document.getElementById('s-bmodel').textContent  = bm.classical_model ?? '—';
+      document.getElementById('s-bmape').textContent   = 'MAPE ' + (bm.classical_mape ? fmt(bm.classical_mape,2)+'%' : '—');
+      document.getElementById('s-dlmodel').textContent = bm.dl_model ?? '—';
+      document.getElementById('s-dlmape').textContent  = 'MAPE ' + (bm.dl_mape ? fmt(bm.dl_mape,2)+'%' : '—');
+
+      /* chart */
+      let dlFc = { forecast_twh: Array(6).fill(null) };
+      try { dlFc = await apiFetch('/forecast/dl/'+c); } catch(_){}
+
+      destroyChart('ovForecast');
+      charts['ovForecast'] = new Chart(
+        document.getElementById('ovForecastChart'), {
+        data: {
+          labels: YEARS,
+          datasets: [
+            { type:'line', label:'Classical', data: fc.forecast_twh,
+              borderColor:'#3b9eff', backgroundColor:'rgba(59,158,255,.08)',
+              borderWidth:2, pointRadius:4, tension:.35, fill:false },
+            { type:'line', label:'DL', data: dlFc.forecast_twh,
+              borderColor:'#00d4a0', backgroundColor:'rgba(0,212,160,.06)',
+              borderWidth:2, pointRadius:4, tension:.35, fill:false, borderDash:[5,3] },
+            ...(fc.upper_90 ? [
+              { type:'line', label:'Upper', data: fc.upper_90,
+                borderColor:'rgba(59,158,255,.15)', backgroundColor:'rgba(59,158,255,.07)',
+                borderWidth:1, pointRadius:0, tension:.35, fill:'+1' },
+              { type:'line', label:'Lower', data: fc.lower_90,
+                borderColor:'rgba(59,158,255,.15)', backgroundColor:'transparent',
+                borderWidth:1, pointRadius:0, tension:.35, fill:false }
+            ] : [])
+          ]
+        },
+        options: {
+          responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{display:false} },
+          scales:{
+            x:{ grid:{color:'rgba(255,255,255,.04)'}, ticks:{font:{size:11}} },
+            y:{ grid:{color:'rgba(255,255,255,.04)'}, ticks:{font:{size:11},
+              callback: v => v >= 1000 ? (v/1000).toFixed(1)+'k' : v.toFixed(1) }}
+          }
+        }
+      });
+
+    } catch(e) {
+      console.error('Overview load error:', e);
+      document.getElementById('stat-cards').innerHTML =
+        `<div class="state-msg error-msg">Failed to load data. Is the API running at ${API_BASE}?<br>Run: make api-run</div>`;
+    }
+  }
+
+  /* ── FORECAST ────────────────────────────────────────────────── */
+  async function loadForecast(){
+    const c = currentCountry;
+    try {
+      const [fc, dlFc] = await Promise.all([
+        apiFetch('/forecast/'+c),
+        apiFetch('/forecast/dl/'+c).catch(()=>({forecast_twh:Array(6).fill(null),model:'—'})),
+      ]);
+
+      document.getElementById('fc-cmodel').textContent = fc.model ?? '—';
+      document.getElementById('fc-dlmodel').textContent = dlFc.model ?? '—';
+
+      /* classical chart */
+      destroyChart('fcClassic');
+      charts['fcClassic'] = new Chart(document.getElementById('fcClassicChart'), {
+        type:'line',
+        data:{ labels:YEARS, datasets:[{
+          label:'Classical', data:fc.forecast_twh,
+          borderColor:'#3b9eff', backgroundColor:'rgba(59,158,255,.1)',
+          borderWidth:2, pointRadius:5, tension:.35, fill:true,
+          ...(fc.upper_90 ? {} : {})
+        }] },
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{legend:{display:false}},
+          scales:{ x:{grid:{color:'rgba(255,255,255,.04)'}},
+                   y:{grid:{color:'rgba(255,255,255,.04)'},
+                      ticks:{callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(1)}} } }
+      });
+
+      /* DL chart */
+      destroyChart('fcDL');
+      charts['fcDL'] = new Chart(document.getElementById('fcDLChart'), {
+        type:'line',
+        data:{ labels:YEARS, datasets:[{
+          label:'Deep Learning', data:dlFc.forecast_twh,
+          borderColor:'#00d4a0', backgroundColor:'rgba(0,212,160,.1)',
+          borderWidth:2, pointRadius:5, tension:.35, fill:true
+        }] },
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{legend:{display:false}},
+          scales:{ x:{grid:{color:'rgba(255,255,255,.04)'}},
+                   y:{grid:{color:'rgba(255,255,255,.04)'},
+                      ticks:{callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(1)}} } }
+      });
+
+      /* table */
+      const tbody = document.getElementById('forecast-tbody');
+      tbody.innerHTML = YEARS.map((yr,i) => `
+        <tr>
+          <td>${yr}</td>
+          <td>${fmt(fc.forecast_twh[i],2)}</td>
+          <td>${fmt(dlFc.forecast_twh[i],2)}</td>
+          <td>${fc.lower_90 ? fmt(fc.lower_90[i],2) : '—'}</td>
+          <td>${fc.upper_90 ? fmt(fc.upper_90[i],2) : '—'}</td>
+        </tr>`).join('');
+
+    } catch(e) {
+      console.error('Forecast load error:', e);
+      document.getElementById('forecast-tbody').innerHTML =
+        `<tr><td colspan="5" class="state-msg error-msg">API offline — run: make api-run</td></tr>`;
+    }
+  }
+
+  /* ── COMPARE ─────────────────────────────────────────────────── */
+  async function loadCompare(){
+    const c = currentCountry;
+    try {
+      const cmp = await apiFetch('/compare/'+c);
+
+      /* classical metrics table */
+      const ct = document.querySelector('#classic-metrics-table tbody');
+      if(cmp.metrics && cmp.metrics.classical){
+        const m = cmp.metrics.classical;
+        ct.innerHTML = `<tr class="best-row">
+          <td class="model-name">${cmp.classical?.model ?? '—'}</td>
+          <td class="num">${fmt(m.MAE)}</td><td class="num">${fmt(m.RMSE)}</td>
+          <td class="num">${fmt(m.MAPE)}</td><td class="num">${fmt(m.R2,3)}</td>
+        </tr>`;
+      } else {
+        ct.innerHTML = `<tr><td colspan="5" class="state-msg">No data</td></tr>`;
+      }
+
+      /* DL metrics table */
+      const dt = document.querySelector('#dl-metrics-table tbody');
+      if(cmp.metrics && cmp.metrics.deeplearning){
+        const m = cmp.metrics.deeplearning;
+        dt.innerHTML = `<tr class="best-row">
+          <td class="model-name">${cmp.deeplearning?.model ?? '—'}</td>
+          <td class="num">${fmt(m.MAE)}</td><td class="num">${fmt(m.RMSE)}</td>
+          <td class="num">${fmt(m.MAPE)}</td><td class="num">${fmt(m.R2,3)}</td>
+        </tr>`;
+      } else {
+        dt.innerHTML = `<tr><td colspan="5" class="state-msg">No data</td></tr>`;
+      }
+
+      /* bar chart */
+      const clMets = cmp.metrics?.classical    ?? {};
+      const dlMets = cmp.metrics?.deeplearning ?? {};
+      const labels = ['MAE','RMSE','MAPE (%)','SMAPE (%)'];
+      const keys   = ['MAE','RMSE','MAPE','SMAPE'];
+
+      destroyChart('compareBar');
+      charts['compareBar'] = new Chart(document.getElementById('compareBarChart'),{
+        type:'bar',
+        data:{
+          labels,
+          datasets:[
+            { label:'Classical', data:keys.map(k=>clMets[k]??0),
+              backgroundColor:'rgba(59,158,255,.65)', borderRadius:4 },
+            { label:'Deep learning', data:keys.map(k=>dlMets[k]??0),
+              backgroundColor:'rgba(0,212,160,.65)', borderRadius:4 }
+          ]
+        },
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{legend:{display:false}},
+          scales:{
+            x:{grid:{display:false}, ticks:{font:{size:11}}},
+            y:{grid:{color:'rgba(255,255,255,.04)'}, ticks:{font:{size:11}}}
+          }
+        }
+      });
+
+    } catch(e) {
+      console.error('Compare load error:', e);
+    }
+  }
+
+  /* ── ASK ─────────────────────────────────────────────────────── */
+  async function sendQuestion(){
+    const inp = document.getElementById('ask-input');
+    const btn = document.getElementById('ask-btn');
+    const ans = document.getElementById('ask-answer');
+    const q   = inp.value.trim();
+    if(!q) return;
+
+    btn.disabled = true;
+    btn.textContent = '…';
+    ans.style.display = 'block';
+    ans.textContent = 'Thinking…';
+
+    try {
+      const r = await fetch(API_BASE+'/ask', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({question: q})
+      });
+      const d = await r.json();
+      ans.textContent = d.answer ?? 'No answer returned.';
+    } catch(e) {
+      ans.textContent = 'API offline. Start the server with: make api-run';
+      ans.style.borderLeftColor = 'var(--accent3)';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Ask →';
+    }
+  }
+
+  function fillQuestion(btn){
+    document.getElementById('ask-input').value = btn.textContent;
+  }
+
+  /* ── API EXPLORER ────────────────────────────────────────────── */
+  function renderApiPage(){
+    document.getElementById('api-base-url').textContent = API_BASE;
+    const c = currentCountry;
+    const endpoints = [
+      { method:'GET',  path:'/health',             desc:'Liveness check + output file status' },
+      { method:'GET',  path:'/countries',           desc:'List of 7 countries' },
+      { method:'GET',  path:`/forecast/${c}`,       desc:'Classical forecast 2025–2030 + 90% CI' },
+      { method:'GET',  path:`/forecast/dl/${c}`,    desc:'Deep learning forecast 2025–2030' },
+      { method:'GET',  path:`/metrics/${c}`,        desc:'Classical model test metrics' },
+      { method:'GET',  path:`/metrics/dl/${c}`,     desc:'Deep learning test metrics' },
+      { method:'GET',  path:`/models/${c}`,         desc:'Best classical + DL model' },
+      { method:'GET',  path:`/growth/${c}`,         desc:'CAGR + total growth summary' },
+      { method:'GET',  path:`/compare/${c}`,        desc:'Classical vs DL side-by-side' },
+      { method:'GET',  path:'/figures',             desc:'List all pipeline figures' },
+      { method:'GET',  path:'/figures/{filename}',  desc:'Serve a PNG / PDF / SVG figure' },
+      { method:'POST', path:'/ask',                 desc:'LangChain Q&A over forecast data' },
+    ];
+
+    document.getElementById('endpoint-list').innerHTML =
+      `<div class="section-head"><span class="section-title">Endpoints — ${c}</span></div>` +
+      endpoints.map(e => `
+        <div class="endpoint-row" onclick="openEndpoint('${e.method}','${e.path}')">
+          <span class="method-badge ${e.method==='POST'?'post-badge':'get-badge'}">${e.method}</span>
+          <span class="endpoint-path">${API_BASE}${e.path}</span>
+          <span class="endpoint-desc">${e.desc}</span>
+        </div>`
+      ).join('');
+  }
+
+  function openEndpoint(method, path){
+    if(method === 'GET' && !path.includes('{'))
+      window.open(API_BASE + path, '_blank');
+    else
+      window.open(API_BASE + '/docs', '_blank');
+  }
+
+  /* ── Init ────────────────────────────────────────────────────── */
+  checkHealth();
+  loadOverview();
+  renderApiPage();
+</script>
+
+</body>
+</html>

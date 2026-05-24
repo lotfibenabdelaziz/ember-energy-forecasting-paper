@@ -1,0 +1,82 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ember-pipeline
+  namespace: ember-pipeline
+  labels:
+    app: ember-pipeline
+    version: "1.0.0"
+spec:
+  ttlSecondsAfterFinished: 3600      # auto-clean job 1h after completion
+  backoffLimit: 2                    # retry up to 2 times on failure
+  template:
+    metadata:
+      labels:
+        app: ember-pipeline
+    spec:
+      restartPolicy: OnFailure
+
+      # ── Init container: wait for MLflow to be ready ───────────────────────
+      initContainers:
+        - name: wait-for-mlflow
+          image: curlimages/curl:latest
+          command:
+            - sh
+            - -c
+            - |
+              until curl -sf http://mlflow-service:5000/health; do
+                echo "Waiting for MLflow..."; sleep 5;
+              done
+
+      containers:
+        - name: pipeline
+          image: ghcr.io/YOUR_ORG/ember-energy-pipeline:latest   # ← update
+          imagePullPolicy: Always
+          command:
+            - python
+            - pipeline.py
+            - --csv
+            - /app/data/raw/yearly_full_release_long_format.csv
+            - --train_until
+            - "2019"
+            - --forecast_until
+            - "2025"
+
+          envFrom:
+            - configMapRef:
+                name: ember-config
+            - secretRef:
+                name: ember-secrets
+
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+              readOnly: true
+            - name: outputs
+              mountPath: /app/outputs
+            - name: mlruns
+              mountPath: /app/mlruns
+            - name: cache
+              mountPath: /app/.cache
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ember-data-pvc
+        - name: outputs
+          persistentVolumeClaim:
+            claimName: ember-outputs-pvc
+        - name: mlruns
+          persistentVolumeClaim:
+            claimName: ember-mlruns-pvc
+        - name: cache
+          persistentVolumeClaim:
+            claimName: ember-cache-pvc

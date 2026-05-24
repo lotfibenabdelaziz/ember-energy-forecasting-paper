@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ember-config
+  namespace: ember-pipeline
+data:
+  OUTPUTS_DIR:          "outputs"
+  OUTPUT_ROOT:          "outputs"
+  TRAIN_UNTIL:          "2019"
+  FORECAST_UNTIL:       "2025"
+  MLFLOW_TRACKING_URI:  "http://mlflow-service:5000"
+  MLFLOW_ARTIFACT_ROOT: "/mlruns/artifacts"
+  PYTHONUNBUFFERED:     "1"
+  ENV:                  "production"
+  PORT:                 "8000"

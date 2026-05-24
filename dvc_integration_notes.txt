@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────────
+# SNIPPETS TO ADD TO EXISTING FILES
+# ─────────────────────────────────────────────────────────────────
+
+# 1. ADD TO .env (after OUTPUTS_DIR line):
+# ──────────────────────────────────────────
+# ── DVC ───────────────────────────────────────────────────────────────────────
+# DVC_REMOTE=s3://your-bucket/ember-energy     # uncomment when remote is ready
+
+
+# 2. ADD TO pyproject.toml [project.optional-dependencies] dev list:
+# ──────────────────────────────────────────────────────────────────
+#     "dvc>=3.0.0",               # pipeline caching & versioning
+#     "dvc-s3>=3.0.0",            # optional: S3 remote support
+#     # "dvc-gs>=3.0.0",          # optional: GCS remote
+#     # "dvc-azure>=3.0.0",       # optional: Azure remote
+
+
+# 3. ADD TO .gitignore:
+# ──────────────────────────────────────────────────────────────────
+# /tmp
+# /cache
+# .dvc/tmp/
+# dvc.lock    ← DO NOT add this — dvc.lock should be committed!
+
+
+# 4. FIRST-TIME SETUP COMMANDS (run once):
+# ──────────────────────────────────────────
+# pip install dvc
+# make dvc-init
+# make dvc-add-data
+# git add data/raw/.gitignore data/raw/yearly_full_release_long_format.csv.dvc .dvc/ dvc.yaml params.yaml .dvcignore
+# git commit -m "chore: add DVC pipeline tracking"
+# dvc repro          # runs full pipeline, caches all outputs
+# dvc push           # uploads cache to remote (after configuring remote)

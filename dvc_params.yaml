@@ -1,0 +1,84 @@
+# params.yaml — Ember Energy Forecasting
+# All tunable parameters tracked by DVC.
+# Change a value → dvc repro only reruns affected stages.
+# Reference in dvc.yaml as ${section.key}
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+data:
+  raw_csv: data/raw/yearly_full_release_long_format.csv
+
+# ── Countries ─────────────────────────────────────────────────────────────────
+countries:
+  list:
+    - Tunisia
+    - Austria
+    - Germany
+    - Egypt
+    - Canada
+    - France
+    - Kuwait
+  target: Demand
+  subcategories:
+    - Demand
+    - CO2 intensity
+    - Total
+    - Fuel
+    - Electricity imports
+
+# ── Output paths ──────────────────────────────────────────────────────────────
+paths:
+  eda:           outputs/eda
+  preprocessing: outputs/preprocessing
+  modeling:      outputs/modeling
+  forecasting:   outputs/forecasting
+  deeplearning:  outputs/deeplearning
+
+# ── Train / Val / Test splits ─────────────────────────────────────────────────
+splits:
+  train_end:    2016
+  val_end:      2020
+  test_end:     2024
+  forecast_start: 2025
+  forecast_end:   2030
+
+# ── Feature engineering ───────────────────────────────────────────────────────
+features:
+  lags:        [1, 2, 3]
+  rolling_windows: [3, 5]
+  include_yoy: true
+
+# ── Classical modeling ────────────────────────────────────────────────────────
+modeling:
+  models:
+    - Ridge
+    - RandomForest
+    - XGBoost
+    - MLP        # sklearn MLP, not torch
+  ridge:
+    alphas: [0.01, 0.1, 1.0, 10.0, 100.0]
+  random_forest:
+    n_estimators: [50, 100, 200]
+    max_depth:    [3, 5, 10, null]
+    min_samples_leaf: [1, 2, 5]
+  xgboost:
+    n_estimators:  [50, 100, 200]
+    max_depth:     [3, 5, 7]
+    learning_rate: [0.01, 0.05, 0.1]
+  selection_metric: MAPE          # metric used to pick best model per country
+
+# ── Deep learning ─────────────────────────────────────────────────────────────
+deeplearning:
+  models:
+    - MLP
+    - TCN
+    - N-BEATS
+    - TFT
+  epochs:     300
+  patience:   40
+  seq_len:    5
+  batch_size: 16
+  lr:         0.001
+  weight_decay: 0.0001
+  seed:       42
+  quick_epochs: 30              # used when --quick flag is passed
+  quick_countries: 1            # number of countries in quick mode
