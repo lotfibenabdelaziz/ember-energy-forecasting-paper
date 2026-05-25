@@ -1,0 +1,431 @@
+# ============================================================================
+# Makefile — Ember Energy Forecasting Pipeline
+# IEEE Paper | CI/CD + MLflow
+# ============================================================================
+# ── Windows Docker PATH fix ───────────────────────────────────────────────────
+# Use PowerShell instead of sh on Windows
+ifeq ($(OS),Windows_NT)
+    SHELL := powershell.exe
+    .SHELLFLAGS := -NoProfile -Command
+endif
+
+export PATH := $(PATH):C:/Program Files/Docker/Docker/resources/bin
+IMAGE_NAME     ?= ember-energy-pipeline
+IMAGE_TAG      ?= latest
+REGISTRY       ?= ghcr.io/lotfibenabdelaziz
+FULL_IMAGE     = $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+
+CSV_PATH       ?= ./data/raw/yearly_full_release_long_format.csv
+TRAIN_UNTIL    ?= 2016
+FORECAST_UNTIL ?= 2030
+NAMESPACE      ?= ember-pipeline
+MLFLOW_PORT    ?= 5000
+
+PYTHON         ?= python
+PIP            ?= pip
+
+.PHONY: help install api-install lint format typecheck \
+        run run-eda run-preprocessing run-modeling run-forecasting \
+        api-run mlflow-ui mlflow-clean mlflow-list \
+        docker-build docker-push docker-run \
+        compose-up compose-pipeline compose-jupyter compose-logs compose-down \
+        k8s-apply k8s-run-pipeline k8s-status k8s-logs k8s-delete \
+        clean clean-all
+
+.DEFAULT_GOAL := help
+
+help:
+	@echo ""
+	@echo "  Ember Energy Forecasting Pipeline"
+	@echo "  ══════════════════════════════════════════════════════"
+	@echo ""
+	@echo "  LOCAL"
+	@echo "    make install              Install all dependencies"
+	@echo "    make lint                 flake8 on src/ api/"
+	@echo "    make format               black + isort"
+	@echo "    make typecheck            mypy"
+	@echo "    make run                  Full pipeline locally"
+	@echo "    make run-eda              EDA step only"
+	@echo "    make run-preprocessing    Preprocessing step only"
+	@echo "    make run-modeling         Benchmark step only"
+	@echo "    make run-forecasting      Forecasting step only"
+	@echo "    make api-run              FastAPI dev server"
+	@echo ""
+	@echo "  MLFLOW"
+	@echo "    make mlflow-ui            Start MLflow UI (port 5000)"
+	@echo "    make mlflow-list          List experiments and runs"
+	@echo "    make mlflow-clean         Delete all local mlruns/"
+	@echo ""
+	@echo "  DOCKER"
+	@echo "    make docker-build         Build pipeline + API images"
+	@echo "    make docker-push          Push to registry"
+	@echo "    make docker-run           Run pipeline in container"
+	@echo ""
+	@echo "  COMPOSE"
+	@echo "    make compose-pipeline     Run pipeline via compose"
+	@echo "    make compose-up           Start API + MLflow"
+	@echo "    make compose-jupyter      Jupyter Lab (dev)"
+	@echo "    make compose-logs         Stream logs"
+	@echo "    make compose-down         Stop all"
+	@echo ""
+	@echo "  KUBERNETES"
+	@echo "    make k8s-apply            Apply all manifests"
+	@echo "    make k8s-run-pipeline     Submit Job"
+	@echo "    make k8s-status           Jobs + Pods + PVCs"
+	@echo "    make k8s-logs             Stream pod logs"
+	@echo "    make k8s-delete           Tear down namespace"
+	@echo ""
+	@echo "  CLEANUP"
+	@echo "    make clean                Remove outputs/"
+	@echo "    make clean-all            Remove outputs/ + mlruns/ + cache"
+	@echo ""
+
+# ── Local ─────────────────────────────────────────────────────────────────────
+# ── Default ───────────────────────────────────────────────────────────────────
+all: run
+# =============================================================================
+# INSTALL
+# =============================================================================
+install:
+	$(PIP) install --upgrade pip
+	$(PIP) install -r requirements.txt
+	@echo "Installed: pipeline + mlflow."
+
+api-install:
+	$(PIP) install -e ".[api,langchain,dev]"
+
+
+run: $(CSV_PATH)
+	MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT) \
+	$(PYTHON) pipeline.py \
+		--csv            $(CSV_PATH) \
+		--train_until    $(TRAIN_UNTIL) \
+		--forecast_until $(FORECAST_UNTIL)
+
+run-eda: $(CSV_PATH)
+	$(PYTHON) src/01_eda.py \
+		--csv        $(CSV_PATH) \
+		--output_dir outputs/eda
+
+run-preprocessing:
+	$(PYTHON) src/02_preprocessing.py \
+		--input_dir   outputs/eda \
+		--output_dir  outputs/preprocessing \
+		--train_until $(TRAIN_UNTIL)
+
+run-modeling:
+	MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT) \
+	$(PYTHON) src/03_modeling.py \
+		--input_dir  outputs/preprocessing \
+		--output_dir outputs/modeling
+
+run-forecasting:
+	MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT) \
+	$(PYTHON) src/04_forecasting.py \
+		--model_dir      outputs/modeling \
+		--pre_dir        outputs/preprocessing \
+		--output_dir     outputs/forecasting \
+		--forecast_until $(FORECAST_UNTIL)
+run-deeplearning:
+	$(PYTHON) src/05_deeplearning.py \
+		--pre_dir  outputs/preprocessing \
+		--output_dir outputs/deeplearning \
+		--quick
+
+# ── Re-run a single step (previous outputs assumed present) ───────────────────
+rerun-eda:
+	$(PYTHON) src/01_eda.py \
+		--csv        $(CSV_PATH) \
+		--output_dir outputs/eda
+
+rerun-preprocessing:
+	$(PYTHON) src/02_preprocessing.py \
+		--input_dir  outputs/eda \
+		--output_dir outputs/preprocessing \
+		--train_until $(TRAIN_UNTIL)
+
+rerun-modeling:
+	$(PYTHON) src/03_modeling.py \
+		--input_dir  outputs/preprocessing \
+		--output_dir outputs/modeling
+
+rerun-forecasting:
+	$(PYTHON) src/04_forecasting.py \
+		--pre_dir    outputs/preprocessing \
+		--model_dir  outputs/modeling \
+		--output_dir outputs/forecasting \
+		--forecast_until $(FORECAST_UNTIL)
+rerun-deeplearning:
+	$(PYTHON) src/05_deeplearning.py \
+		--pre_dir  outputs/preprocessing \
+		--output_dir outputs/deeplearning
+
+# =============================================================================
+# TESTS
+# =============================================================================
+
+# Full suite — all tests + coverage report
+test:
+	pytest tests/ \
+		-v --tb=short \
+		--cov=src --cov=api --cov=pipeline --cov=mlflow_config \
+		--cov-report=term-missing \
+		--cov-report=html:htmlcov \
+		--cov-report=xml:coverage.xml \
+		--cov-config=.coveragerc
+	@echo ""
+	@echo "✓ Coverage report → htmlcov/index.html"
+
+# Fast — unit tests only, stop on first failure, no integration
+test-fast:
+	pytest tests/ \
+		-v --tb=short -x -q \
+		--ignore=tests/test_api.py \
+		--ignore=tests/test_pipeline.py \
+		--ignore=tests/test_deeplearning.py \
+		--ignore=tests/test_parity.py        
+
+# Unit tests only (same as fast but no -x)
+test-unit:
+	pytest tests/test_eda.py \
+	       tests/test_preprocessing.py \
+	       tests/test_modeling.py \
+	       tests/test_forecasting.py \
+	       tests/test_mlflow_config.py \
+	       tests/test_deeplearning.py \
+		   tests/test_deeplearning.py\
+		-v --tb=short
+
+# Deep learning tests only
+test-dl:
+	pytest tests/test_deeplearning.py -v --tb=short
+
+# API tests only (requires pipeline outputs to exist)
+test-api:
+	pytest tests/test_api.py -v --tb=short
+
+# Integration tests only
+test-pipeline:
+	pytest tests/test_pipeline.py -v --tb=short
+# Parity tests — notebook vs script output comparison
+test-parity:
+	pytest tests/test_parity.py -v --tb=short
+
+# Run full pipeline then check parity
+test-parity-full: run
+	pytest tests/test_parity.py -v --tb=short
+	#@echo "  make test-parity          Compare .py outputs vs notebook outputs"
+
+# Coverage only (no verbose output)
+test-cov:
+	pytest tests/ -q \
+		--ignore=tests/test_api.py \
+		--ignore=tests/test_pipeline.py \
+		--cov=src --cov=pipeline --cov=mlflow_config \
+		--cov-report=term-missing \
+		--cov-report=html:htmlcov \
+		--cov-config=.coveragerc
+	@echo "✓ Coverage report → htmlcov/index.html"
+
+
+
+# =============================================================================
+# CODE QUALITY
+# =============================================================================
+
+lint:
+	flake8 src/ api/ pipeline.py mlflow_config.py \
+		--max-line-length=100 --ignore=E501,W503
+	@echo "✓ Lint passed."
+
+lint-fix:
+	isort src/ api/ pipeline.py mlflow_config.py
+	black src/ api/ pipeline.py mlflow_config.py --line-length 100
+	@echo "✓ Format applied."
+
+format: lint-fix
+
+typecheck:
+	mypy src/ api/ mlflow_config.py --config-file mypy.ini
+	@echo "✓ Type check passed."
+
+# Run all quality checks in sequence
+check: lint typecheck test-fast
+	@echo "✓ All checks passed."
+
+# =============================================================================
+# API
+# =============================================================================
+
+PORT           ?= 8000
+
+api-run:
+	ENV=development OUTPUT_ROOT=outputs \
+	uvicorn api.main:app --reload --host 0.0.0.0 --port $(PORT)
+
+# ── MLflow ────────────────────────────────────────────────────────────────────
+mlflow-ui:
+	@echo "MLflow UI → http://127.0.0.1:$(MLFLOW_PORT)"
+	mlflow server \
+		--host 0.0.0.0 \
+		--port $(MLFLOW_PORT) \
+		--backend-store-uri ./mlruns \
+		--default-artifact-root ./mlruns/artifacts
+
+mlflow-list:
+	MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT) \
+	mlflow runs list --experiment-name ember-demand-forecasting
+
+mlflow-clean:
+	rm -rf mlruns/
+	@echo "mlruns/ deleted."
+
+# =============================================================================
+# DVC — Data Version Control
+# =============================================================================
+
+# ── Setup ─────────────────────────────────────────────────────────────────────
+# dvc-init:
+# 	dvc init
+# 	dvc config core.autostage true
+# 	dvc config core.analytics false
+# 	@echo "✓ DVC initialised. Add a remote: make dvc-remote-add"
+
+# dvc-remote-add:
+# 	@echo "Edit .dvc/config and uncomment your preferred remote, then run:"
+# 	@echo "  dvc remote default <name>"
+
+# # ── Data ──────────────────────────────────────────────────────────────────────
+# dvc-add-data:
+# 	dvc add data/raw/yearly_full_release_long_format.csv
+# 	@echo "✓ Data file tracked by DVC. Commit the .dvc pointer file."
+
+# dvc-pull:
+# 	dvc pull
+# 	@echo "✓ Data and outputs pulled from remote."
+
+# dvc-push:
+# 	dvc push
+# 	@echo "✓ Data and outputs pushed to remote."
+
+# # ── Pipeline ──────────────────────────────────────────────────────────────────
+# dvc-repro:
+# 	dvc repro
+# 	@echo "✓ Pipeline reproduced. Run 'dvc push' to cache outputs."
+
+# dvc-repro-eda:
+# 	dvc repro eda
+
+# dvc-repro-preprocessing:
+# 	dvc repro preprocessing
+
+# dvc-repro-modeling:
+# 	dvc repro modeling
+
+# dvc-repro-forecasting:
+# 	dvc repro forecasting
+
+# dvc-repro-deeplearning:
+# 	dvc repro deeplearning
+
+# # ── Inspection ────────────────────────────────────────────────────────────────
+# dvc-dag:
+# 	dvc dag
+
+# dvc-status:
+# 	dvc status
+
+# dvc-params:
+# 	dvc params diff
+
+# dvc-metrics:
+# 	dvc metrics show
+# 	dvc metrics diff
+
+# dvc-plots:
+# 	dvc plots show
+
+# # ── Cache ─────────────────────────────────────────────────────────────────────
+# dvc-gc:
+# 	dvc gc --workspace --force
+# 	@echo "✓ Unused cache entries removed."
+
+# dvc-cache-info:
+# 	du -sh .dvc/cache 2>/dev/null || echo "No local cache yet."
+
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+docker-build:
+	docker build -t $(FULL_IMAGE) -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	docker build -f Dockerfile.api -t $(REGISTRY)/ember-energy-api:$(IMAGE_TAG) .
+	@echo "Both images built."
+
+docker-push: docker-build
+	docker push $(FULL_IMAGE)
+	docker push $(REGISTRY)/ember-energy-api:$(IMAGE_TAG)
+
+docker-run: $(CSV_PATH)
+	docker run --rm \
+		-e MLFLOW_TRACKING_URI=http://host.docker.internal:$(MLFLOW_PORT) \
+		-v $(PWD)/data:/app/data:ro \
+		-v $(PWD)/outputs:/app/outputs \
+		-v $(PWD)/mlruns:/app/mlruns \
+		$(IMAGE_NAME):$(IMAGE_TAG) \
+		--csv            /app/$(CSV_PATH) \
+		--train_until    $(TRAIN_UNTIL) \
+		--forecast_until $(FORECAST_UNTIL)
+
+# ── Compose ───────────────────────────────────────────────────────────────────
+compose-pipeline: $(CSV_PATH)
+	docker compose run --rm pipeline
+
+compose-up:
+	docker compose up mlflow api --build -d
+	@echo "API    → http://localhost:$${PORT:-8000}/docs"
+	@echo "MLflow → http://localhost:$(MLFLOW_PORT)"
+
+compose-jupyter:
+	docker compose --profile dev up jupyter --build
+
+compose-logs:
+	docker compose logs --follow
+
+compose-down:
+	docker compose down --remove-orphans
+
+# ── Kubernetes ────────────────────────────────────────────────────────────────
+k8s-apply:
+	kubectl apply -f k8s/namespace.yaml
+	kubectl apply -f k8s/pvc.yaml
+	kubectl apply -f k8s/configmap.yaml
+	kubectl apply -f k8s/secret.yaml 2>/dev/null || true
+	kubectl apply -f k8s/
+	@echo "All K8s manifests applied."
+
+k8s-run-pipeline:
+	kubectl delete job ember-pipeline -n $(NAMESPACE) --ignore-not-found
+	kubectl apply -f k8s/job-pipeline.yaml
+	@echo "Job submitted. Watch: make k8s-logs"
+
+k8s-status:
+	kubectl get jobs,pods,pvc -n $(NAMESPACE)
+
+k8s-logs:
+	kubectl logs -n $(NAMESPACE) -l app=ember-pipeline --follow --tail=100
+
+k8s-delete:
+	kubectl delete namespace $(NAMESPACE) --ignore-not-found
+
+# ── Cleanup ───────────────────────────────────────────────────────────────────
+clean:
+	rm -rf outputs/
+
+clean-all: clean mlflow-clean
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -name "*.pyc" -delete
+	find . -name ".ipynb_checkpoints" -exec rm -rf {} + 2>/dev/null || true
+
+$(CSV_PATH):
+	@echo "ERROR: $(CSV_PATH) not found."
+	@echo "Place your Ember CSV at: $(CSV_PATH)"
+	@exit 1

@@ -9,11 +9,16 @@ data/
 
 notebooks/
 
-
+.matplotlib_cache/
 # Pipeline outputs (auto-generated — never commit)
+.env
 outputs/
+mlruns/
 .cache/
-
+__pycache__/
+*.pyc
+htmlcov/
+.dvc/cache/
 # Python
 __pycache__/
 *.py[cod]
