@@ -1,0 +1,48 @@
+schema: '2.0'
+stages:
+  eda:
+    cmd: python src/01_eda.py --csv        
+      data/raw/yearly_full_release_long_format.csv --output_dir outputs/eda
+    deps:
+    - path: data/raw/yearly_full_release_long_format.csv
+      hash: md5
+      md5: 64c8e8509e4ed6fde616e860a258a66f
+      size: 47522296
+    - path: src/01_eda.py
+      hash: md5
+      md5: 083248c59c8631fe23df88a4a600eafc
+      size: 12202
+    params:
+      params.yaml:
+        countries:
+          list:
+          - Tunisia
+          - Austria
+          - Germany
+          - Egypt
+          - Canada
+          - France
+          - Kuwait
+          target: Demand
+          subcategories:
+          - Demand
+          - CO2 intensity
+          - Total
+          - Fuel
+          - Electricity imports
+        data:
+          raw_csv: data/raw/yearly_full_release_long_format.csv
+    outs:
+    - path: outputs/eda/ember_filtered.csv
+      hash: md5
+      md5: d4d63625cb267d60ec0e4b426861ea41
+      size: 356905
+    - path: outputs/eda/figures
+      hash: md5
+      md5: 9028f534f638e32519deb71e8959d134.dir
+      size: 187032
+      nfiles: 6
+    - path: outputs/eda/table01_eda_statistics.csv
+      hash: md5
+      md5: b1f719f974ca685ecea3b627f3a02d7a
+      size: 361
