@@ -78,7 +78,7 @@ services:
       - --default-artifact-root=/mlruns/artifacts
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000')"]
       interval: 20s
       timeout: 5s
       retries: 5

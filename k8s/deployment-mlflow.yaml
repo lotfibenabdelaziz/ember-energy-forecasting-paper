@@ -18,24 +18,30 @@ spec:
       containers:
         - name: mlflow
           image: ghcr.io/mlflow/mlflow:v2.12.1
-          command:
-            - mlflow
+          imagePullPolicy: IfNotPresent
+          command: ["mlflow"]
+          args:
             - server
             - --host=0.0.0.0
             - --port=5000
             - --backend-store-uri=/mlruns
             - --default-artifact-root=/mlruns/artifacts
+            - --serve-artifacts
+            - --workers=1 
 
           ports:
             - containerPort: 5000
 
           resources:
             requests:
-              cpu: "250m"
-              memory: "256Mi"
-            limits:
-              cpu: "500m"
+              cpu:    "100m"
               memory: "512Mi"
+            limits:
+              cpu:    "500m"
+              memory: "1Gi"
+          env:
+            - name: GUNICORN_CMD_ARGS
+              value: "--workers=1 --timeout=120"
 
           volumeMounts:
             - name: mlruns
@@ -45,20 +51,23 @@ spec:
             httpGet:
               path: /health
               port: 5000
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 30
+            failureThreshold: 5
 
           readinessProbe:
             httpGet:
               path: /health
               port: 5000
-            initialDelaySeconds: 15
+            initialDelaySeconds: 20
             periodSeconds: 10
+            failureThreshold: 5
 
       volumes:
         - name: mlruns
-          persistentVolumeClaim:
-            claimName: ember-mlruns-pvc
+          hostPath:
+            path: /run/desktop/mnt/host/c/Users/bcs/Desktop/Energy World Project V2/mlruns
+            type: DirectoryOrCreate
 
 ---
 apiVersion: v1
@@ -69,8 +78,9 @@ metadata:
 spec:
   selector:
     app: mlflow
+  type: NodePort
   ports:
     - protocol: TCP
       port: 5000
       targetPort: 5000
-  type: ClusterIP
+      nodePort: 30500

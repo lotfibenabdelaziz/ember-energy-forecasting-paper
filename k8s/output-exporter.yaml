@@ -8,7 +8,6 @@ metadata:
     component: exporter
 spec:
   restartPolicy: Never
-
   containers:
     - name: exporter
       image: busybox:1.35
@@ -17,23 +16,19 @@ spec:
         - -c
         - |
           echo "Output files available at /outputs"
-          echo "Copy them with:"
-          echo "  kubectl cp ember-pipeline/ember-output-exporter:/outputs ./outputs"
-          echo ""
+          echo "Copy with: kubectl cp ember-pipeline/ember-output-exporter:/outputs ./outputs"
           ls -lRh /outputs/
-          # Keep pod alive for 30 min to allow kubectl cp
           sleep 1800
       volumeMounts:
         - name: outputs-volume
           mountPath: /outputs
           readOnly: true
-
+      resources:
+        limits:
+          cpu: "100m"
+          memory: "128Mi"
   volumes:
     - name: outputs-volume
-      persistentVolumeClaim:
-        claimName: ember-outputs-pvc
-
-# ── Usage ──────────────────────────────────────────────────────────────────────
-# kubectl apply -f k8s/output-exporter.yaml
-# kubectl cp ember-pipeline/ember-output-exporter:/outputs ./outputs
-# kubectl delete pod ember-output-exporter -n ember-pipeline
+      hostPath:
+        path: /run/desktop/mnt/host/c/Users/bcs/Desktop/Energy World Project V2/outputs
+        type: DirectoryOrCreate

@@ -6,13 +6,16 @@ metadata:
   labels:
     app: ember-pipeline
     version: "1.0.0"
+
 spec:
-  ttlSecondsAfterFinished: 3600      # auto-clean job 1h after completion
-  backoffLimit: 2                    # retry up to 2 times on failure
+  ttlSecondsAfterFinished: 3600  # auto-clean job 1h after completion
+  backoffLimit: 2                # retry up to 2 times on failure
+
   template:
     metadata:
       labels:
         app: ember-pipeline
+
     spec:
       restartPolicy: OnFailure
 
@@ -28,19 +31,22 @@ spec:
                 echo "Waiting for MLflow..."; sleep 5;
               done
 
+      # ── Main container ────────────────────────────────────────────────────
       containers:
         - name: pipeline
-          image: ghcr.io/YOUR_ORG/ember-energy-pipeline:latest   # ← update
-          imagePullPolicy: Always
+          image: ember-energy-pipeline:latest  # ← update with registry/tag
+          imagePullPolicy: IfNotPresent
+
           command:
             - python
             - pipeline.py
             - --csv
             - /app/data/raw/yearly_full_release_long_format.csv
             - --train_until
-            - "2019"
+            - "2016"
             - --forecast_until
-            - "2025"
+            - "2030"
+            - "--force"
 
           envFrom:
             - configMapRef:
@@ -50,11 +56,11 @@ spec:
 
           resources:
             requests:
+              cpu: "500m"   # was "500" — must use millicores suffix
+              memory: "1Gi"
+            limits:
               cpu: "2"
               memory: "4Gi"
-            limits:
-              cpu: "4"
-              memory: "8Gi"
 
           volumeMounts:
             - name: data
@@ -67,16 +73,21 @@ spec:
             - name: cache
               mountPath: /app/.cache
 
+      # ── Volumes ───────────────────────────────────────────────────────────
       volumes:
         - name: data
-          persistentVolumeClaim:
-            claimName: ember-data-pvc
+          hostPath:
+            path: /run/desktop/mnt/host/c/Users/bcs/Desktop/Energy World Project V2/data
+            type: Directory
         - name: outputs
-          persistentVolumeClaim:
-            claimName: ember-outputs-pvc
+          hostPath:
+            path: /run/desktop/mnt/host/c/Users/bcs/Desktop/Energy World Project V2/outputs
+            type: DirectoryOrCreate
         - name: mlruns
-          persistentVolumeClaim:
-            claimName: ember-mlruns-pvc
+          hostPath:
+            path: /run/desktop/mnt/host/c/Users/bcs/Desktop/Energy World Project V2/mlruns
+            type: DirectoryOrCreate
         - name: cache
-          persistentVolumeClaim:
-            claimName: ember-cache-pvc
+          hostPath:
+            path: /run/desktop/mnt/host/c/Users/bcs/Desktop/Energy World Project V2/.cache
+            type: DirectoryOrCreate

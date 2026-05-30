@@ -27,16 +27,14 @@ import copy
 import json
 import logging
 import os
-import time
 import warnings
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings("ignore")
@@ -219,7 +217,7 @@ if HAS_TORCH:
             return self.n_samples
 
         def __getitem__(self, i):
-            return self.X[i : i + self.seq_len], self.y[i + self.seq_len]
+            return self.X[i:i + self.seq_len], self.y[i + self.seq_len]
 
     def make_loaders(df_country, feature_cols, target, seq_len, train_end, val_end, batch_size):
         tr = df_country[df_country["Year"] <= train_end]
@@ -468,7 +466,7 @@ if HAS_TORCH:
 
         def forward(self, x):
             B, T, F = x.shape
-            feat_emb = torch.stack([self.grns[i](x[..., i : i + 1]) for i in range(F)], dim=-2)
+            feat_emb = torch.stack([self.grns[i](x[..., i: i + 1]) for i in range(F)], dim=-2)
             weights = self.softmax(self.weight(x))
             out = (feat_emb * weights.unsqueeze(-1)).sum(dim=-2)
             return out, weights

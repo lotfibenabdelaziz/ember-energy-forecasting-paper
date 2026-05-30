@@ -490,4 +490,4 @@ dvc>=3.0.0
 
 ## License
 
-MIT © Your Name — see [LICENSE](LICENSE)
+MIT © Lotfi Ben Abdelaziz — see [LICENSE](LICENSE)

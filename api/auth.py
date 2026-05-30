@@ -26,6 +26,7 @@ from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBea
 # ── Optional JWT support ──────────────────────────────────────────────────────
 try:
     from jose import JWTError, jwt
+
     JWT_AVAILABLE = True
 except ImportError:
     JWT_AVAILABLE = False
@@ -35,52 +36,61 @@ ALGORITHM = "HS256"
 
 # ── All config read at call-time so monkeypatch works in tests ────────────────
 
+
 def _secret_key() -> str:
     return os.getenv("SECRET_KEY", "dev-secret-key-change-in-production-32chars")
+
 
 def _admin_username() -> str:
     return os.getenv("ADMIN_USERNAME", "admin")
 
+
 def _admin_password() -> str:
     return os.getenv("ADMIN_PASSWORD", "")
+
 
 def _token_expire_minutes() -> int:
     return int(os.getenv("TOKEN_EXPIRE_MINUTES", 60))
 
+
 def _api_key() -> str:
     return os.getenv("DASHBOARD_API_KEY", "")
+
 
 def _rate_limit_requests() -> int:
     return int(os.getenv("RATE_LIMIT_REQUESTS", 60))
 
+
 def _rate_limit_window() -> int:
     return int(os.getenv("RATE_LIMIT_WINDOW", 60))
 
+
 # ── Schemes ───────────────────────────────────────────────────────────────────
-bearer_scheme  = HTTPBearer(auto_error=False)
+bearer_scheme = HTTPBearer(auto_error=False)
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 # ── In-memory stores (module-level — survive reloads within same process) ─────
 _rate_store: dict[str, list[float]] = {}
-_blacklist:  set[str]               = set()
+_blacklist: set[str] = set()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # JWT helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def create_access_token(
-    data:          dict,
+    data: dict,
     expires_delta: timedelta | None = None,
 ) -> str:
     """Create a signed JWT access token."""
     if not JWT_AVAILABLE:
         raise RuntimeError(
-            "python-jose not installed — run: pip install python-jose[cryptography]"
-        )
+            "python-jose not installed — run: pip install python-jose[cryptography]")
     payload = data.copy()
-    now     = datetime.now(timezone.utc)
-    expire  = now + (expires_delta or timedelta(minutes=_token_expire_minutes()))
+    now = datetime.now(timezone.utc)
+    expire = now + \
+        (expires_delta or timedelta(minutes=_token_expire_minutes()))
     payload.update({"exp": expire, "iat": now})
     return jwt.encode(payload, _secret_key(), algorithm=ALGORITHM)
 
@@ -91,7 +101,8 @@ def decode_token(token: str) -> dict:
     Raises HTTPException 401 on any failure.
     """
     if not JWT_AVAILABLE:
-        raise HTTPException(status_code=501, detail="JWT not available — install python-jose")
+        raise HTTPException(
+            status_code=501, detail="JWT not available — install python-jose")
     if token in _blacklist:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -118,6 +129,7 @@ def revoke_token(token: str) -> None:
 # Rate limiter
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def check_rate_limit(request: Request) -> None:
     """
     Sliding-window rate limiter.
@@ -125,15 +137,14 @@ def check_rate_limit(request: Request) -> None:
     within RATE_LIMIT_WINDOW seconds.
     Uses X-Forwarded-For when behind a reverse proxy.
     """
-    ip = (
-        request.headers.get("X-Forwarded-For", "")
-        or (request.client.host if request.client else "unknown")
+    ip = request.headers.get("X-Forwarded-For", "") or (
+        request.client.host if request.client else "unknown"
     )
-    ip  = ip.split(",")[0].strip()
+    ip = ip.split(",")[0].strip()
     now = time.time()
 
-    window  = _rate_limit_window()
-    limit   = _rate_limit_requests()
+    window = _rate_limit_window()
+    limit = _rate_limit_requests()
 
     hits = [t for t in _rate_store.get(ip, []) if now - t < window]
     hits.append(now)
@@ -150,6 +161,7 @@ def check_rate_limit(request: Request) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 # FastAPI dependencies
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def get_current_user(
     credentials: Annotated[
@@ -214,6 +226,6 @@ def optional_auth(
     if key and stored and key == stored:
         return {"sub": "api-key-user", "role": "reader"}
     if not credentials and not key:
-        return None          # no credentials — public access
+        return None  # no credentials — public access
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                         detail="Invalid credentials")

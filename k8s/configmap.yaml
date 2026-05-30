@@ -6,8 +6,8 @@ metadata:
 data:
   OUTPUTS_DIR:          "outputs"
   OUTPUT_ROOT:          "outputs"
-  TRAIN_UNTIL:          "2019"
-  FORECAST_UNTIL:       "2025"
+  TRAIN_UNTIL:          "2016"
+  FORECAST_UNTIL:       "2030"
   MLFLOW_TRACKING_URI:  "http://mlflow-service:5000"
   MLFLOW_ARTIFACT_ROOT: "/mlruns/artifacts"
   PYTHONUNBUFFERED:     "1"

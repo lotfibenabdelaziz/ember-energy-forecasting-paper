@@ -43,7 +43,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -54,11 +54,10 @@ from api.auth import (
     _token_expire_minutes,
     bearer_scheme,
     create_access_token,
+    decode_token,
     get_current_user,
     rate_limit,
-    require_api_key,
     revoke_token,
-    decode_token,
 )
 
 load_dotenv()
@@ -68,29 +67,35 @@ log = logging.getLogger(__name__)
 # ── Output paths ──────────────────────────────────────────────────────────────
 _ROOT = Path(os.getenv("OUTPUT_ROOT", os.getenv("OUTPUTS_DIR", "outputs")))
 
-FORECAST_CSV     = _ROOT / "forecasting"   / "demand_forecast_2025_2030.csv"
-METRICS_CSV      = _ROOT / "forecasting"   / "forecast_metrics.csv"
-GROWTH_CSV       = _ROOT / "forecasting"   / "demand_growth_summary.csv"
-BEST_MODELS_CSV  = _ROOT / "modeling"      / "best_models.csv"
-BENCHMARKING_CSV = _ROOT / "modeling"      / "test_benchmarking.csv"
-DL_FORECAST_CSV  = _ROOT / "deeplearning"  / "dl_forecast_2025_2030.csv"
-DL_METRICS_CSV   = _ROOT / "deeplearning"  / "dl_benchmarking.csv"
-DL_BEST_CSV      = _ROOT / "deeplearning"  / "dl_best_models.csv"
+FORECAST_CSV = _ROOT / "forecasting" / "demand_forecast_2025_2030.csv"
+METRICS_CSV = _ROOT / "forecasting" / "test_metrics.csv"
+GROWTH_CSV = _ROOT / "forecasting" / "demand_growth_summary.csv"
+BEST_MODELS_CSV = _ROOT / "modeling" / "best_models.csv"
+BENCHMARKING_CSV = _ROOT / "modeling" / "test_benchmarking.csv"
+DL_FORECAST_CSV = _ROOT / "deeplearning" / "dl_forecast_2025_2030.csv"
+DL_METRICS_CSV = _ROOT / "deeplearning" / "dl_benchmarking.csv"
+DL_BEST_CSV = _ROOT / "deeplearning" / "dl_best_models.csv"
 
 FIGURES_DIRS = [
-    _ROOT / "eda"          / "figures",
+    _ROOT / "eda" / "figures",
     _ROOT / "preprocessing" / "figures",
-    _ROOT / "modeling"     / "figures",
-    _ROOT / "forecasting"  / "figures",
+    _ROOT / "modeling" / "figures",
+    _ROOT / "forecasting" / "figures",
     _ROOT / "deeplearning" / "figures",
 ]
 
 COUNTRIES = [
-    "Tunisia", "Austria", "Germany",
-    "Egypt",   "Canada",  "France", "Kuwait",
+    "Tunisia",
+    "Austria",
+    "Germany",
+    "Egypt",
+    "Canada",
+    "France",
+    "Kuwait",
 ]
 
 # ── Data loader ───────────────────────────────────────────────────────────────
+
 
 def _load(path: Path, label: str) -> pd.DataFrame:
     if not path.exists():
@@ -101,14 +106,14 @@ def _load(path: Path, label: str) -> pd.DataFrame:
 
 def _load_all() -> dict[str, pd.DataFrame]:
     return {
-        "forecast":    _load(FORECAST_CSV,     "forecast"),
-        "metrics":     _load(METRICS_CSV,      "metrics"),
-        "growth":      _load(GROWTH_CSV,       "growth"),
-        "best_models": _load(BEST_MODELS_CSV,  "best_models"),
-        "benchmark":   _load(BENCHMARKING_CSV, "benchmark"),
-        "dl_forecast": _load(DL_FORECAST_CSV,  "dl_forecast"),
-        "dl_metrics":  _load(DL_METRICS_CSV,   "dl_metrics"),
-        "dl_best":     _load(DL_BEST_CSV,      "dl_best"),
+        "forecast": _load(FORECAST_CSV, "forecast"),
+        "metrics": _load(METRICS_CSV, "metrics"),
+        "growth": _load(GROWTH_CSV, "growth"),
+        "best_models": _load(BEST_MODELS_CSV, "best_models"),
+        "benchmark": _load(BENCHMARKING_CSV, "benchmark"),
+        "dl_forecast": _load(DL_FORECAST_CSV, "dl_forecast"),
+        "dl_metrics": _load(DL_METRICS_CSV, "dl_metrics"),
+        "dl_best": _load(DL_BEST_CSV, "dl_best"),
     }
 
 
@@ -119,16 +124,16 @@ _DATA: dict[str, pd.DataFrame] = _load_all()
 # ═══════════════════════════════════════════════════════════════════════════════
 
 app = FastAPI(
-    title       = "Ember Energy Forecasting API",
-    description = (
+    title="Ember Energy Forecasting API",
+    description=(
         "REST API for per-country electricity demand forecasts (2025-2030) "
         "based on the Ember annual energy dataset. IEEE Paper.\n\n"
         "**Authentication:** POST `/auth/login` → copy `access_token` → "
         "click 🔒 Authorize → paste `Bearer <token>`"
     ),
-    version  = "1.0.0",
-    docs_url = "/docs",
-    redoc_url= "/redoc",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
@@ -139,21 +144,22 @@ ALLOWED_ORIGINS = os.getenv(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins     = ALLOWED_ORIGINS,
-    allow_methods     = ["GET", "POST"],
-    allow_headers     = ["Authorization", "X-API-Key", "Content-Type"],
-    allow_credentials = True,
-    max_age           = 600,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "X-API-Key", "Content-Type"],
+    allow_credentials=True,
+    max_age=600,
 )
+
 
 # ── Security headers ──────────────────────────────────────────────────────────
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"]        = "DENY"
-        response.headers["X-XSS-Protection"]       = "1; mode=block"
-        response.headers["Referrer-Policy"]        = "strict-origin-when-cross-origin"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com "
@@ -165,10 +171,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "connect-src 'self';"
         )
         if os.getenv("ENV") == "production":
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains"
-            )
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
+
 
 app.add_middleware(SecurityHeadersMiddleware)
 
@@ -181,25 +186,31 @@ if _static.exists():
 # Pydantic schemas
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class LoginRequest(BaseModel):
     username: str
     password: str
 
+
 class TokenResponse(BaseModel):
     access_token: str
-    token_type:   str = "bearer"
-    expires_in:   int = 3600          # seconds
+    token_type: str = "bearer"
+    expires_in: int = 3600  # seconds
+
 
 class AskRequest(BaseModel):
     question: str
 
+
 class AskResponse(BaseModel):
     question: str
-    answer:   str
+    answer: str
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Internal helpers
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def _validate_country(country: str) -> str:
     match = next((c for c in COUNTRIES if c.lower() == country.lower()), None)
@@ -234,22 +245,28 @@ def _metrics_dict(row: pd.Series) -> dict[str, Any]:
         if k not in ("Country", "Model") and _is_finite(v)
     }
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Global exception handler — never leak stack traces
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    log.error("Unhandled exception: %s %s — %s", request.method, request.url, exc)
+    log.error("Unhandled exception: %s %s — %s",
+              request.method, request.url, exc)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PUBLIC endpoints — no auth required
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @app.get("/", include_in_schema=False)
 def root():
     from fastapi.responses import RedirectResponse
+
     return RedirectResponse(url="/static/index.html")
 
 
@@ -257,7 +274,7 @@ def root():
 def health() -> dict:
     """Liveness check — returns API status and which output files are loaded."""
     return {
-        "status":  "ok",
+        "status": "ok",
         "outputs": {k: not v.empty for k, v in _DATA.items()},
     }
 
@@ -269,6 +286,7 @@ def get_countries() -> dict:
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
+
 
 @app.post("/auth/login", tags=["auth"], response_model=TokenResponse)
 def login(body: LoginRequest, request: Request) -> TokenResponse:
@@ -302,8 +320,7 @@ def login(body: LoginRequest, request: Request) -> TokenResponse:
     )
 
 
-@app.post("/auth/logout", tags=["auth"],
-          dependencies=[Depends(get_current_user)])
+@app.post("/auth/logout", tags=["auth"], dependencies=[Depends(get_current_user)])
 def logout(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> dict:
@@ -313,8 +330,7 @@ def logout(
     return {"message": "Logged out successfully"}
 
 
-@app.get("/auth/me", tags=["auth"],
-         dependencies=[Depends(get_current_user)])
+@app.get("/auth/me", tags=["auth"], dependencies=[Depends(get_current_user)])
 def me(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> dict:
@@ -329,29 +345,29 @@ def me(
 
 # ── Classical forecast ────────────────────────────────────────────────────────
 
-@app.get("/forecast/{country}", tags=["forecast"],
-         dependencies=[Depends(get_current_user)])
+
+@app.get("/forecast/{country}", tags=["forecast"], dependencies=[Depends(get_current_user)])
 def get_forecast(country: str) -> dict:
     """Classical ML demand forecast (2025-2030) + 90% Bootstrap CI."""
     country = _validate_country(country)
-    df      = _require(_DATA["forecast"], "Forecast")
+    df = _require(_DATA["forecast"], "Forecast")
 
     sub = df[df["Country"] == country]
     if sub.empty:
         raise HTTPException(404, f"No forecast data for {country}")
 
     if "Model" in sub.columns and not _DATA["best_models"].empty:
-        bm  = _DATA["best_models"]
+        bm = _DATA["best_models"]
         row = bm[bm["Country"] == country]
         if not row.empty:
             sub = sub[sub["Model"] == row.iloc[0]["Model"]]
 
-    sub    = sub.sort_values("Year")
+    sub = sub.sort_values("Year")
     result: dict[str, Any] = {
-        "country":        country,
-        "model":          sub["Model"].iloc[0] if "Model" in sub.columns else "unknown",
+        "country": country,
+        "model": sub["Model"].iloc[0] if "Model" in sub.columns else "unknown",
         "forecast_years": sub["Year"].tolist(),
-        "forecast_twh":   [round(v, 3) for v in sub["Forecast"].tolist()],
+        "forecast_twh": [round(v, 3) for v in sub["Forecast"].tolist()],
     }
     if "Lower_90" in sub.columns:
         result["lower_90"] = [round(v, 3) for v in sub["Lower_90"].tolist()]
@@ -361,33 +377,33 @@ def get_forecast(country: str) -> dict:
 
 # ── Deep learning forecast ────────────────────────────────────────────────────
 
-@app.get("/forecast/dl/{country}", tags=["forecast"],
-         dependencies=[Depends(get_current_user)])
+
+@app.get("/forecast/dl/{country}", tags=["forecast"], dependencies=[Depends(get_current_user)])
 def get_dl_forecast(country: str) -> dict:
     """Deep learning demand forecast (2025-2030)."""
     country = _validate_country(country)
-    df      = _require(_DATA["dl_forecast"], "DL Forecast")
+    df = _require(_DATA["dl_forecast"], "DL Forecast")
 
     sub = df[df["Country"] == country].sort_values("Year")
     if sub.empty:
         raise HTTPException(404, f"No DL forecast data for {country}")
 
     return {
-        "country":        country,
-        "model":          sub["Model"].iloc[0] if "Model" in sub.columns else "dl",
+        "country": country,
+        "model": sub["Model"].iloc[0] if "Model" in sub.columns else "dl",
         "forecast_years": sub["Year"].tolist(),
-        "forecast_twh":   [round(v, 3) for v in sub["Forecast"].tolist()],
+        "forecast_twh": [round(v, 3) for v in sub["Forecast"].tolist()],
     }
 
 
 # ── Classical metrics ─────────────────────────────────────────────────────────
 
-@app.get("/metrics/{country}", tags=["metrics"],
-         dependencies=[Depends(get_current_user)])
+
+@app.get("/metrics/{country}", tags=["metrics"], dependencies=[Depends(get_current_user)])
 def get_metrics(country: str) -> dict:
     """Classical model test-set metrics (MAE, RMSE, MAPE, SMAPE, R², TheilU)."""
     country = _validate_country(country)
-    df      = _require(_DATA["metrics"], "Metrics")
+    df = _require(_DATA["metrics"], "Metrics")
 
     if "Country" not in df.columns:
         df = df.reset_index()
@@ -400,19 +416,19 @@ def get_metrics(country: str) -> dict:
 
     return {
         "country": country,
-        "model":   sub["Model"].iloc[0] if "Model" in sub.columns else "unknown",
+        "model": sub["Model"].iloc[0] if "Model" in sub.columns else "unknown",
         "metrics": _metrics_dict(sub.iloc[0]),
     }
 
 
 # ── Deep learning metrics ─────────────────────────────────────────────────────
 
-@app.get("/metrics/dl/{country}", tags=["metrics"],
-         dependencies=[Depends(get_current_user)])
+
+@app.get("/metrics/dl/{country}", tags=["metrics"], dependencies=[Depends(get_current_user)])
 def get_dl_metrics(country: str) -> dict:
     """Deep learning test-set metrics for the best model."""
     country = _validate_country(country)
-    df      = _require(_DATA["dl_metrics"], "DL Metrics")
+    df = _require(_DATA["dl_metrics"], "DL Metrics")
 
     sub = df[df["Country"] == country]
     if sub.empty:
@@ -425,15 +441,15 @@ def get_dl_metrics(country: str) -> dict:
 
     return {
         "country": country,
-        "model":   sub["Model"].iloc[0] if "Model" in sub.columns else "dl",
+        "model": sub["Model"].iloc[0] if "Model" in sub.columns else "dl",
         "metrics": _metrics_dict(sub.iloc[0]),
     }
 
 
 # ── Best models ───────────────────────────────────────────────────────────────
 
-@app.get("/models/{country}", tags=["meta"],
-         dependencies=[Depends(get_current_user)])
+
+@app.get("/models/{country}", tags=["meta"], dependencies=[Depends(get_current_user)])
 def get_best_models(country: str) -> dict:
     """Return the best classical and DL model for a country."""
     country = _validate_country(country)
@@ -462,12 +478,12 @@ def get_best_models(country: str) -> dict:
 
 # ── Growth summary ────────────────────────────────────────────────────────────
 
-@app.get("/growth/{country}", tags=["forecast"],
-         dependencies=[Depends(get_current_user)])
+
+@app.get("/growth/{country}", tags=["forecast"], dependencies=[Depends(get_current_user)])
 def get_growth(country: str) -> dict:
     """CAGR and total growth summary (2024 → 2030)."""
     country = _validate_country(country)
-    df      = _require(_DATA["growth"], "Growth summary")
+    df = _require(_DATA["growth"], "Growth summary")
 
     sub = df[df["Country"] == country]
     if sub.empty:
@@ -478,15 +494,16 @@ def get_growth(country: str) -> dict:
         "country": country,
         "summary": {
             k: (round(float(v), 4) if _is_finite(v) else v)
-            for k, v in row.items() if k != "Country"
+            for k, v in row.items()
+            if k != "Country"
         },
     }
 
 
 # ── Compare classical vs DL ───────────────────────────────────────────────────
 
-@app.get("/compare/{country}", tags=["forecast"],
-         dependencies=[Depends(get_current_user)])
+
+@app.get("/compare/{country}", tags=["forecast"], dependencies=[Depends(get_current_user)])
 def compare_forecasts(country: str) -> dict:
     """Side-by-side comparison of classical and DL forecasts + metrics."""
     country = _validate_country(country)
@@ -496,24 +513,25 @@ def compare_forecasts(country: str) -> dict:
         sub = _DATA["forecast"][_DATA["forecast"]["Country"] == country]
         if not sub.empty:
             if "Model" in sub.columns and not _DATA["best_models"].empty:
-                bm  = _DATA["best_models"]
+                bm = _DATA["best_models"]
                 row = bm[bm["Country"] == country]
                 if not row.empty:
                     sub = sub[sub["Model"] == row.iloc[0]["Model"]]
             sub = sub.sort_values("Year")
             result["classical"] = {
-                "model":          sub["Model"].iloc[0] if "Model" in sub.columns else "unknown",
+                "model": sub["Model"].iloc[0] if "Model" in sub.columns else "unknown",
                 "forecast_years": sub["Year"].tolist(),
-                "forecast_twh":   [round(v, 3) for v in sub["Forecast"].tolist()],
+                "forecast_twh": [round(v, 3) for v in sub["Forecast"].tolist()],
             }
 
     if not _DATA["dl_forecast"].empty:
-        sub = _DATA["dl_forecast"][_DATA["dl_forecast"]["Country"] == country].sort_values("Year")
+        sub = _DATA["dl_forecast"][_DATA["dl_forecast"]
+                                   ["Country"] == country].sort_values("Year")
         if not sub.empty:
             result["deeplearning"] = {
-                "model":          sub["Model"].iloc[0] if "Model" in sub.columns else "dl",
+                "model": sub["Model"].iloc[0] if "Model" in sub.columns else "dl",
                 "forecast_years": sub["Year"].tolist(),
-                "forecast_twh":   [round(v, 3) for v in sub["Forecast"].tolist()],
+                "forecast_twh": [round(v, 3) for v in sub["Forecast"].tolist()],
             }
 
     metrics_cmp: dict[str, Any] = {}
@@ -544,8 +562,8 @@ def compare_forecasts(country: str) -> dict:
 
 # ── Figures ───────────────────────────────────────────────────────────────────
 
-@app.get("/figures", tags=["figures"],
-         dependencies=[Depends(get_current_user)])
+
+@app.get("/figures", tags=["figures"], dependencies=[Depends(get_current_user)])
 def list_figures() -> dict:
     """List all available figure files across all pipeline steps."""
     figures = []
@@ -553,25 +571,26 @@ def list_figures() -> dict:
         if fig_dir.exists():
             for f in sorted(fig_dir.iterdir()):
                 if f.suffix.lower() in {".png", ".pdf", ".svg", ".html"}:
-                    figures.append({
-                        "filename": f.name,
-                        "step":     fig_dir.parent.name,
-                        "path":     str(f.relative_to(_ROOT)),
-                    })
+                    figures.append(
+                        {
+                            "filename": f.name,
+                            "step": fig_dir.parent.name,
+                            "path": str(f.relative_to(_ROOT)),
+                        }
+                    )
     return {"figures": figures, "total": len(figures)}
 
 
-@app.get("/figures/{filename}", tags=["figures"],
-         dependencies=[Depends(get_current_user)])
+@app.get("/figures/{filename}", tags=["figures"], dependencies=[Depends(get_current_user)])
 def get_figure(filename: str) -> FileResponse:
     """Serve a figure file (PNG / PDF / SVG / HTML)."""
     for fig_dir in FIGURES_DIRS:
         candidate = fig_dir / filename
         if candidate.exists():
             media = {
-                ".png":  "image/png",
-                ".pdf":  "application/pdf",
-                ".svg":  "image/svg+xml",
+                ".png": "image/png",
+                ".pdf": "application/pdf",
+                ".svg": "image/svg+xml",
                 ".html": "text/html",
             }.get(candidate.suffix.lower(), "application/octet-stream")
             return FileResponse(str(candidate), media_type=media)
@@ -580,8 +599,13 @@ def get_figure(filename: str) -> FileResponse:
 
 # ── LangChain Q&A ─────────────────────────────────────────────────────────────
 
-@app.post("/ask", tags=["ai"], response_model=AskResponse,
-          dependencies=[Depends(get_current_user), Depends(rate_limit)])
+
+@app.post(
+    "/ask",
+    tags=["ai"],
+    response_model=AskResponse,
+    dependencies=[Depends(get_current_user), Depends(rate_limit)],
+)
 def ask(body: AskRequest) -> AskResponse:
     """
     Natural language Q&A over forecast data.
@@ -606,7 +630,8 @@ def _build_context() -> str:
     lines = ["Ember Energy Forecasting — Summary\n"]
     if not _DATA["forecast"].empty:
         for country in COUNTRIES:
-            sub = _DATA["forecast"][_DATA["forecast"]["Country"] == country].sort_values("Year")
+            sub = _DATA["forecast"][_DATA["forecast"]
+                                    ["Country"] == country].sort_values("Year")
             if not sub.empty:
                 lines.append(
                     f"{country}: {sub['Year'].iloc[0]}={round(sub['Forecast'].iloc[0],2)} TWh"
@@ -616,21 +641,26 @@ def _build_context() -> str:
         for country in COUNTRIES:
             sub = _DATA["growth"][_DATA["growth"]["Country"] == country]
             if not sub.empty and "CAGR (%)" in sub.columns:
-                lines.append(f"{country}: CAGR={round(float(sub.iloc[0]['CAGR (%)']),2)}%")
+                lines.append(
+                    f"{country}: CAGR={round(float(sub.iloc[0]['CAGR (%)']),2)}%")
     return "\n".join(lines)
 
 
 def _langchain_answer(question: str) -> str:
     from langchain.schema import HumanMessage, SystemMessage
     from langchain_openai import ChatOpenAI
+
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    return llm.invoke([
-        SystemMessage(content=(
-            "You are an energy analyst. Answer using only this data:\n\n"
-            + _build_context()
-        )),
-        HumanMessage(content=question),
-    ]).content
+    return llm.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "You are an energy analyst. Answer using only this data:\n\n" + _build_context()
+                )
+            ),
+            HumanMessage(content=question),
+        ]
+    ).content
 
 
 def _rule_based_answer(question: str) -> str:
@@ -656,16 +686,11 @@ def _rule_based_answer(question: str) -> str:
     for country in COUNTRIES:
         if country.lower() in q:
             if not _DATA["forecast"].empty:
-                sub = _DATA["forecast"][
-                    _DATA["forecast"]["Country"] == country
-                ].sort_values("Year")
+                sub = _DATA["forecast"][_DATA["forecast"]
+                                        ["Country"] == country].sort_values("Year")
                 if not sub.empty:
-                    return (
-                        f"{country} demand forecast: "
-                        + ", ".join(
-                            f"{y}: {round(v,1)} TWh"
-                            for y, v in zip(sub["Year"], sub["Forecast"])
-                        )
+                    return f"{country} demand forecast: " + ", ".join(
+                        f"{y}: {round(v,1)} TWh" for y, v in zip(sub["Year"], sub["Forecast"])
                     )
 
     return (
@@ -677,13 +702,15 @@ def _rule_based_answer(question: str) -> str:
 
 # ── Dev entry point ───────────────────────────────────────────────────────────
 
+
 def start() -> None:
     import uvicorn
+
     uvicorn.run(
         "api.main:app",
-        host   = "0.0.0.0",
-        port   = int(os.getenv("PORT", 8000)),
-        reload = os.getenv("ENV", "production") == "development",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8000)),
+        reload=os.getenv("ENV", "production") == "development",
     )
 
 

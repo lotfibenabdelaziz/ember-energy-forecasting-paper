@@ -4,79 +4,78 @@ metadata:
   name: ember-pipeline-scheduled
   namespace: ember-pipeline
   labels:
-    app: ember-energy-forecasting
-    component: cronjob
+    app: ember-pipeline
 spec:
-  # Run every Monday at 02:00 UTC
-  schedule: "0 2 * * 1"
-
-  # Keep last 2 successful and 1 failed Job history
-  successfulJobsHistoryLimit: 2
-  failedJobsHistoryLimit: 1
-
-  # Skip run if previous is still running
-  concurrencyPolicy: Forbid
-
+  schedule: "0 2 * * 0"          # every Sunday at 02:00 UTC
+  concurrencyPolicy: Forbid       # don't run if previous still running
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 2
   jobTemplate:
     spec:
-      backoffLimit: 1
       ttlSecondsAfterFinished: 7200
-
+      backoffLimit: 1
       template:
         metadata:
           labels:
             app: ember-pipeline
-            component: cronjob
+            trigger: scheduled
         spec:
-          restartPolicy: Never
-
-          imagePullSecrets:
-            - name: ember-registry-secret
-
+          restartPolicy: OnFailure
+          initContainers:
+            - name: wait-for-mlflow
+              image: ember-energy-pipeline:latest
+              command:
+                - sh
+                - -c
+                - |
+                  until curl -sf http://mlflow-service:5000/health; do
+                    echo "Waiting for MLflow..."; sleep 5;
+                  done
           containers:
             - name: pipeline
-              image: ghcr.io/your-org/ember-energy-pipeline:latest  # ← update
-              imagePullPolicy: Always
-
+              image: ember-energy-pipeline:latest
+              imagePullPolicy: IfNotPresent
               command:
                 - python
                 - pipeline.py
-              args:
-                - "--csv"
-                - "/app/data/ember_yearly_full_release_long_format.csv"
+                - --csv
+                - /app/data/raw/yearly_full_release_long_format.csv
                 - "--train_until"
-                - "$(TRAIN_UNTIL)"
+                - "2016"
                 - "--forecast_until"
-                - "$(FORECAST_UNTIL)"
-
+                - "2030"
               envFrom:
                 - configMapRef:
-                    name: ember-pipeline-config
-
-              env:
-                - name: PYTHONUNBUFFERED
-                  value: "1"
-
+                    name: ember-config
+                - secretRef:
+                    name: ember-secrets
               resources:
                 requests:
-                  memory: "2Gi"
-                  cpu:    "1000m"
+                  cpu: "500m"
+                  memory: "1Gi"
                 limits:
-                  memory: "6Gi"
-                  cpu:    "4000m"
-
+                  cpu: "2"
+                  memory: "4Gi"
               volumeMounts:
-                - name: data-volume
+                - name: data
                   mountPath: /app/data
                   readOnly: true
-                - name: outputs-volume
+                - name: outputs
                   mountPath: /app/outputs
-
+                - name: mlruns
+                  mountPath: /app/mlruns
+                - name: cache
+                  mountPath: /app/.cache
           volumes:
-            - name: data-volume
+            - name: data
               persistentVolumeClaim:
                 claimName: ember-data-pvc
-                readOnly: true
-            - name: outputs-volume
+            - name: outputs
               persistentVolumeClaim:
                 claimName: ember-outputs-pvc
+            - name: mlruns
+              persistentVolumeClaim:
+                claimName: ember-mlruns-pvc
+            - name: cache
+              persistentVolumeClaim:
+                claimName: ember-cache-pvc

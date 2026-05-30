@@ -1,0 +1,138 @@
+Region,Country,Number of data centre,,,,,
+,,Total,both metrics available,n/a white space data,n/a gross power data,available white space data,available gross power data
+Americas,Dominican Republic,1,0,1,1,0,0
+Americas,Guatemala,1,0,1,1,0,0
+Americas,Bolivia,2,0,2,2,0,0
+Americas,Venezuela,2,0,1,2,1,0
+Americas,Trinidad and Tobago,3,0,3,3,0,0
+Americas,Ecuador,4,0,3,4,1,0
+Americas,Uruguay,5,0,5,5,0,0
+Americas,Chile,6,0,5,6,1,0
+Americas,Panama,7,0,5,7,2,0
+Americas,Costa Rica,8,0,8,8,0,0
+Americas,Colombia,11,0,9,11,2,0
+Americas,Peru,11,0,9,11,2,0
+Americas,Argentina,20,1,16,19,4,1
+Americas,Mexico,31,0,31,30,0,1
+Americas,Brazil,143,10,129,133,14,10
+Americas,Canada,163,30,95,133,68,30
+Americas,United States of America,2052,386,1241,1645,811,407
+Asia,Afghanistan,1,0,1,1,0,0
+Asia,Myanmar,1,0,1,1,0,0
+Asia,Nepal,1,0,1,1,0,0
+Asia,Sri Lanka,1,1,0,0,1,1
+Asia,Uzbekistan,1,0,1,1,0,0
+Asia,Bangladesh,2,0,2,2,0,0
+Asia,Kazakhstan,2,1,1,1,1,1
+Asia,Cambodia,3,0,3,3,0,0
+Asia,Iran (Islamic Republic of),6,1,5,5,1,1
+Asia,Jordan,6,1,5,5,1,1
+Asia,Vietnam,10,0,7,10,3,0
+Asia,Philippines,16,0,16,16,0,0
+Asia,Thailand,16,1,11,15,5,1
+Asia,South Korea,20,1,18,19,2,1
+Asia,Pakistan,22,0,21,22,1,0
+Asia,Indonesia,57,4,48,53,9,4
+Asia,Malaysia,63,4,47,59,16,4
+Asia,Singapore,74,11,54,61,20,13
+Asia,Japan,93,2,70,90,23,3
+Asia,India,148,20,119,128,29,20
+Asia,China,209,13,176,187,33,22
+Europe,Azerbaijan,1,0,1,1,0,0
+Europe,Bosnia and Herzegovina,1,1,0,0,1,1
+Europe,Georgia,1,0,1,1,0,0
+Europe,Macedonia,1,0,1,1,0,0
+Europe,Monaco,1,0,1,1,0,0
+Europe,Belarus,2,0,2,2,0,0
+Europe,Iceland,2,0,2,2,0,0
+Europe,Moldavia,2,1,1,1,1,1
+Europe,Armenia,4,0,4,4,0,0
+Europe,Liechtenstein,4,0,3,4,1,0
+Europe,Greece,5,0,5,5,0,0
+Europe,Serbia,5,2,3,3,2,2
+Europe,Croatia,6,2,4,4,2,2
+Europe,Slovenia,8,0,8,8,0,0
+Europe,Cyprus,9,0,9,9,0,0
+Europe,Malta,9,0,9,9,0,0
+Europe,Lithuania,12,0,12,12,0,0
+Europe,Slovakia,15,2,12,13,3,2
+Europe,Estonia,17,3,14,13,3,4
+Europe,Hungary,17,2,12,15,5,2
+Europe,Latvia,22,0,22,22,0,0
+Europe,Luxemburg,26,8,12,18,14,8
+Europe,Czech Republic,29,4,18,25,11,4
+Europe,Bulgaria,30,1,28,29,2,1
+Europe,Austria,31,1,26,30,5,1
+Europe,Romania,32,4,26,28,6,4
+Europe,Ukraine,34,0,34,34,0,0
+Europe,Norway,36,14,18,22,18,14
+Europe,Portugal,38,2,34,36,4,2
+Europe,Finland,39,6,31,32,8,7
+Europe,Denmark,41,4,35,37,6,4
+Europe,Turkey,44,7,33,37,11,7
+Europe,Belgium,52,3,41,48,11,4
+Europe,Poland,56,7,39,49,17,7
+Europe,Ireland,61,4,47,57,14,4
+Europe,Russian Federation,74,9,62,65,12,9
+Europe,Sweden,74,7,59,66,15,8
+Europe,Spain,91,5,80,86,11,5
+Europe,Italy,95,12,82,83,13,12
+Europe,Switzerland,95,6,77,89,18,6
+Europe,Germany,254,20,185,209,69,45
+Europe,France,259,25,210,233,49,26
+Europe,Netherlands,300,70,163,227,137,73
+Europe,United Kingdom,395,65,247,323,148,72
+Middle East and North Africa,Libya,1,0,1,1,0,0
+Middle East and North Africa,Bahrainn,2,0,2,2,0,0
+Middle East and North Africa,Lebanon,2,0,2,2,0,0
+Middle East and North Africa,Equatorial Guinea,3,0,3,3,0,0
+Middle East and North Africa,Mauritania,3,0,3,3,0,0
+Middle East and North Africa,Sudan,3,0,3,3,0,0
+Middle East and North Africa,Kuwait,4,0,4,4,0,0
+Middle East and North Africa,Oman,5,1,4,4,1,1
+Middle East and North Africa,Algeria,7,1,6,6,1,1
+Middle East and North Africa,Qatar,7,2,5,5,2,2
+Middle East and North Africa,Tunisia,7,1,5,6,2,1
+Middle East and North Africa,Israel,9,0,9,9,0,0
+Middle East and North Africa,Morocco,14,1,9,12,5,2
+Middle East and North Africa,United Arab Emirates,14,1,11,13,3,1
+Middle East and North Africa,Egypt,18,1,16,16,2,2
+Middle East and North Africa,Saudi Arabia,55,1,50,54,5,1
+Pacific,Polynesia,1,0,1,1,0,0
+Pacific,New Zeland,50,0,48,48,2,2
+Pacific,Australia,181,20,136,161,45,20
+Sub-Saharan Africa,Cape Verde,1,0,1,1,0,0
+Sub-Saharan Africa,Chad,1,1,0,0,1,1
+Sub-Saharan Africa,Djibouti,1,1,0,0,1,1
+Sub-Saharan Africa,Gambia,1,0,1,1,0,0
+Sub-Saharan Africa,Guinea-Bissau,1,0,1,1,0,0
+Sub-Saharan Africa,Mali,1,0,1,1,0,0
+Sub-Saharan Africa,Sao Tome e Principe,1,0,1,1,0,0
+Sub-Saharan Africa,Sierra Leone,1,0,1,1,0,0
+Sub-Saharan Africa,South Sudan,1,0,1,1,0,0
+Sub-Saharan Africa,Zimbabwe,1,0,1,1,0,0
+Sub-Saharan Africa,Botswana,2,0,2,2,0,0
+Sub-Saharan Africa,Burkina Faso,2,0,2,2,0,0
+Sub-Saharan Africa,Eswatini,2,0,2,2,0,0
+Sub-Saharan Africa,Gabon,2,0,2,2,0,0
+Sub-Saharan Africa,Liberia,2,0,2,2,0,0
+Sub-Saharan Africa,Togo,2,0,1,2,1,0
+Sub-Saharan Africa,Malawi,3,0,3,3,0,0
+Sub-Saharan Africa,Rwanda,3,0,3,3,0,0
+Sub-Saharan Africa,Congo,5,0,5,5,0,0
+Sub-Saharan Africa,Benin,6,0,6,6,0,0
+Sub-Saharan Africa,Senegal,6,2,3,4,3,2
+Sub-Saharan Africa,Zambia,7,1,5,6,2,1
+Sub-Saharan Africa,Mozambique,8,0,8,8,0,0
+Sub-Saharan Africa,Namibia,8,0,8,8,0,0
+Sub-Saharan Africa,Cameroon,9,0,8,9,1,0
+Sub-Saharan Africa,Ivory Coast,11,3,6,8,5,3
+Sub-Saharan Africa,Mauritius,11,1,9,10,2,1
+Sub-Saharan Africa,Angola,12,0,10,12,2,0
+Sub-Saharan Africa,Tanzania,14,0,14,14,0,0
+Sub-Saharan Africa,Uganda,14,2,12,12,2,2
+Sub-Saharan Africa,Kenya,28,5,22,23,6,5
+Sub-Saharan Africa,Ghana,30,6,22,24,8,6
+Sub-Saharan Africa,Nigeria,38,1,35,37,3,1
+Sub-Saharan Africa,South Africa,66,9,52,57,14,9
+,,6239,845,4452,5316,1787,923

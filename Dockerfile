@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements-docker.txt .
 
 RUN pip install --upgrade pip
+RUN apt-get update && apt-get install -y curl
 
 # Install torch CPU separately (heaviest package — cache independently)
 RUN pip install --prefix=/install --no-cache-dir \

@@ -210,15 +210,6 @@ def plot_feature_corr(df_model: pd.DataFrame, all_subs: list, target: str, fig_d
 def plot_split(
     df_model: pd.DataFrame, target: str, train_end: int, val_end: int, fig_dir: str
 ) -> None:
-    COLORS = {
-        "Tunisia": "#1f77b4",
-        "Austria": "#d62728",
-        "Germany": "#2ca02c",
-        "Egypt": "#9467bd",
-        "Canada": "#e6a817",
-        "France": "#8c564b",
-        "Kuwait": "#17becf",
-    }
     fig, axes = plt.subplots(2, 4, figsize=(20, 8), sharey=False)
     axes = axes.flatten()
     zone_c = {"Train": "#2196F3", "Val": "#FF9800", "Test": "#F44336"}

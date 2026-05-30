@@ -6,7 +6,7 @@ metadata:
   labels:
     app: ember-api
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: ember-api
@@ -22,8 +22,8 @@ spec:
     spec:
       containers:
         - name: api
-          image: ghcr.io/YOUR_ORG/ember-energy-api:latest    # ← update
-          imagePullPolicy: Always
+          image: ember-energy-api:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
 
@@ -35,11 +35,11 @@ spec:
 
           resources:
             requests:
-              cpu: "500m"
-              memory: "512Mi"
+              cpu:    "100m"
+              memory: "256Mi"
             limits:
-              cpu: "1"
-              memory: "1Gi"
+              cpu:    "500m"
+              memory: "512Mi"
 
           volumeMounts:
             - name: outputs
@@ -64,8 +64,9 @@ spec:
 
       volumes:
         - name: outputs
-          persistentVolumeClaim:
-            claimName: ember-outputs-pvc
+          hostPath:
+            path: /run/desktop/mnt/host/c/Users/bcs/Desktop/Energy World Project V2/outputs
+            type: DirectoryOrCreate
 
 ---
 apiVersion: v1
@@ -76,29 +77,9 @@ metadata:
 spec:
   selector:
     app: ember-api
+  type: NodePort
   ports:
     - protocol: TCP
       port: 80
       targetPort: 8000
-  type: ClusterIP
-
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: ember-api-ingress
-  namespace: ember-pipeline
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-spec:
-  rules:
-    - host: ember-api.your-domain.com       # ← update
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: ember-api-service
-                port:
-                  number: 80
+      nodePort: 30800

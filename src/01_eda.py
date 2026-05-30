@@ -10,7 +10,6 @@ Writes:  outputs/eda/ember_filtered.csv
 """
 
 import argparse
-import json
 import logging
 import os
 import warnings
@@ -20,7 +19,6 @@ import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from scipy import stats
 from statsmodels.tsa.stattools import adfuller
 
 warnings.filterwarnings("ignore")
