@@ -1,49 +1,97 @@
 """
-pipeline_cache.py — Input-hash caching for the Ember pipeline.
+pipeline_cache.py — SHA-256 Input-Hash Caching for the Ember Pipeline
+======================================================================
+Design pattern : Repository pattern + dataclasses
+Formatting     : RUFF-compliant (ruff check + ruff format)
 
 How it works:
-  Before running a step, we hash:
-    - The script file itself
-    - All declared input files / directories
-    - The relevant params from params.yaml
+    Before running a step, hash:
+      - The script file
+      - All declared input files / directories
+      - The relevant params from params.yaml
 
-  The hash is stored in  .cache/pipeline/<step>.hash
-  If it matches → step is skipped.
-  If it differs  → step runs, new hash saved on success.
+    Hash stored in .cache/pipeline/cache.json
+    Match  → step skipped
+    Differ → step runs, new hash saved on success
 
-Usage (inside pipeline.py):
-    from pipeline_cache import StepCache
+Usage:
+    from pipeline_cache import StepCache, StepDefinition
+
     cache = StepCache()
-    if cache.is_cached("eda", deps=[csv_path], params=["data", "countries"]):
-        log.info("── CACHED: eda (inputs unchanged)")
-        continue
-    run_step(...)
-    cache.save("eda", deps=[csv_path], params=["data", "countries"])
+    step  = StepDefinition(
+        name    = "eda",
+        script  = "src/01_eda.py",
+        deps    = ["data/raw/ember.csv"],
+        params  = ["data", "countries"],
+        outputs = ["outputs/eda/ember_filtered.csv"],
+    )
+
+    if cache.is_cached(step):
+        log.info("Skipping eda — inputs unchanged")
+    else:
+        run_step(...)
+        cache.mark_done(step)
 """
+
+from __future__ import annotations
 
 import hashlib
 import json
 import logging
-import os
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
 log = logging.getLogger(__name__)
 
-CACHE_DIR = Path(os.getenv("CACHE_DIR", ".cache/pipeline"))
+# ── Constants ─────────────────────────────────────────────────────────────────
+CACHE_DIR   = Path(".cache/pipeline")
+LOCK_FILE   = CACHE_DIR / "cache.json"
 PARAMS_FILE = Path("params.yaml")
-LOCK_FILE = CACHE_DIR / "cache.json"  # stores {step: hash}
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Data classes ──────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class StepDefinition:
+    """
+    Immutable definition of a pipeline step and its cache dependencies.
+
+    Attributes
+    ----------
+    name    : Unique step identifier (e.g. "eda", "modeling")
+    script  : Path to the .py script file
+    deps    : Input files/dirs that affect the cache hash
+    params  : Top-level keys from params.yaml that affect the hash
+    outputs : Files that must exist for cache to be considered valid
+    """
+
+    name:    str
+    script:  str
+    deps:    list[str]  = field(default_factory=list)
+    params:  list[str]  = field(default_factory=list)
+    outputs: list[str]  = field(default_factory=list)
 
 
-def _hash_file(path: Path, chunk: int = 1 << 20) -> str:
-    """SHA-256 of a single file (streamed — safe for large CSVs)."""
+@dataclass
+class CacheEntry:
+    """A single cached step — stores the fingerprint hash."""
+
+    step:        str
+    fingerprint: str
+
+    def is_valid(self, current: str) -> bool:
+        return self.fingerprint == current
+
+
+# ── Hash helpers ──────────────────────────────────────────────────────────────
+
+def _hash_file(path: Path, chunk_size: int = 1 << 20) -> str:
+    """SHA-256 of a single file — streamed for large CSVs."""
     h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while data := f.read(chunk):
+    with path.open("rb") as f:
+        while data := f.read(chunk_size):
             h.update(data)
     return h.hexdigest()
 
@@ -58,19 +106,19 @@ def _hash_dir(path: Path) -> str:
     return h.hexdigest()
 
 
-def _hash_path(p: str | Path) -> str | None:
-    """Hash a file or directory; return None if it doesn't exist."""
-    p = Path(p)
-    if not p.exists():
-        return None
-    return _hash_dir(p) if p.is_dir() else _hash_file(p)
+def _hash_path(p: str | Path) -> str:
+    """Hash a file or directory. Returns 'missing' if path doesn't exist."""
+    path = Path(p)
+    if not path.exists():
+        return "missing"
+    return _hash_dir(path) if path.is_dir() else _hash_file(path)
 
 
 def _hash_params(keys: list[str]) -> str:
     """Hash specific top-level keys from params.yaml."""
     if not PARAMS_FILE.exists():
         return "no-params"
-    with open(PARAMS_FILE) as f:
+    with PARAMS_FILE.open() as f:
         all_params = yaml.safe_load(f) or {}
     selected = {k: all_params.get(k) for k in keys}
     blob = json.dumps(selected, sort_keys=True, default=str)
@@ -78,131 +126,138 @@ def _hash_params(keys: list[str]) -> str:
 
 
 def _hash_script(script: str) -> str:
-    """Hash the .py script so code changes invalidate the cache."""
-    p = Path(script)
-    return _hash_file(p) if p.exists() else "no-script"
+    """Hash the script file so code changes invalidate the cache."""
+    path = Path(script)
+    return _hash_file(path) if path.exists() else "no-script"
 
 
-def _compute_step_hash(
-    script: str,
-    deps: list[str],
-    params: list[str],
-) -> str:
-    """Combine hashes of script + deps + params into one fingerprint."""
+def _compute_fingerprint(step: StepDefinition) -> str:
+    """
+    Combine hashes of script + deps + params into one fingerprint.
+    Any change to any input produces a different fingerprint.
+    """
     h = hashlib.sha256()
-    h.update(_hash_script(script).encode())
-    for dep in sorted(deps):
-        dep_hash = _hash_path(dep) or "missing"
-        h.update(f"{dep}:{dep_hash}".encode())
-    h.update(_hash_params(params).encode())
+    h.update(_hash_script(step.script).encode())
+    for dep in sorted(step.deps):
+        h.update(f"{dep}:{_hash_path(dep)}".encode())
+    h.update(_hash_params(step.params).encode())
     return h.hexdigest()
 
 
-# ── StepCache ─────────────────────────────────────────────────────────────────
+# ── Cache repository ──────────────────────────────────────────────────────────
 
+class StepCacheRepository:
+    """
+    Low-level JSON file repository for cache entries.
+    Follows the Repository pattern — separates storage from business logic.
+    """
+
+    def __init__(self, lock_file: Path = LOCK_FILE) -> None:
+        self._lock_file = lock_file
+        self._store: dict[str, str] = {}
+        self._load()
+
+    def _load(self) -> None:
+        self._lock_file.parent.mkdir(parents=True, exist_ok=True)
+        if self._lock_file.exists():
+            with self._lock_file.open() as f:
+                self._store = json.load(f)
+
+    def _save(self) -> None:
+        with self._lock_file.open("w") as f:
+            json.dump(self._store, f, indent=2)
+
+    def get(self, step_name: str) -> CacheEntry | None:
+        fp = self._store.get(step_name)
+        return CacheEntry(step=step_name, fingerprint=fp) if fp else None
+
+    def put(self, entry: CacheEntry) -> None:
+        self._store[entry.step] = entry.fingerprint
+        self._save()
+
+    def delete(self, step_name: str) -> None:
+        self._store.pop(step_name, None)
+        self._save()
+
+    def clear(self) -> None:
+        self._store.clear()
+        self._save()
+
+    def all_entries(self) -> dict[str, str]:
+        return {k: v[:12] for k, v in self._store.items()}
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
 
 class StepCache:
     """
-    Manages a simple JSON lock-file that stores per-step input hashes.
+    High-level cache manager for pipeline steps.
+
+    Uses StepCacheRepository for storage and StepDefinition for step metadata.
 
     Example
     -------
     cache = StepCache()
 
-    if cache.is_cached("eda", script="src/01_eda.py",
-                        deps=["data/raw/ember.csv"],
-                        params=["data", "countries"]):
-        log.info("Skipping eda — inputs unchanged")
+    step = StepDefinition(
+        name    = "eda",
+        script  = "src/01_eda.py",
+        deps    = ["data/raw/ember.csv"],
+        params  = ["data", "countries"],
+        outputs = ["outputs/eda/ember_filtered.csv"],
+    )
+
+    if cache.is_cached(step):
+        log.info("Skipping eda")
     else:
         run_step(...)
-        cache.mark_done("eda", script="src/01_eda.py",
-                        deps=["data/raw/ember.csv"],
-                        params=["data", "countries"])
+        cache.mark_done(step)
     """
 
     def __init__(self, cache_dir: Path = CACHE_DIR) -> None:
-        self.cache_dir = cache_dir
-        self.lock_file = cache_dir / "cache.json"
-        self._store: dict[str, str] = {}
-        self._load()
+        self._repo = StepCacheRepository(cache_dir / "cache.json")
 
-    # ── private ───────────────────────────────────────────────────────────────
-
-    def _load(self) -> None:
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        if self.lock_file.exists():
-            with open(self.lock_file) as f:
-                self._store = json.load(f)
-
-    def _save(self) -> None:
-        with open(self.lock_file, "w") as f:
-            json.dump(self._store, f, indent=2)
-
-    def _fingerprint(
-        self,
-        step: str,
-        script: str,
-        deps: list[str],
-        params: list[str],
-    ) -> str:
-        return _compute_step_hash(script, deps, params)
-
-    # ── public ────────────────────────────────────────────────────────────────
-
-    def is_cached(
-        self,
-        step: str,
-        script: str,
-        deps: list[str],
-        params: list[str],
-        outputs: list[str] | None = None,
-    ) -> bool:
+    def is_cached(self, step: StepDefinition) -> bool:
         """
         Return True if:
-          - The stored hash matches the current input hash, AND
-          - All declared output files/dirs exist.
+          - All declared outputs exist on disk, AND
+          - The stored fingerprint matches the current input hash.
         """
-        # If any output is missing, always re-run regardless of hash
-        if outputs:
-            for out in outputs:
-                if not Path(out).exists():
-                    log.debug("Cache MISS (%s): output missing → %s", step, out)
-                    return False
+        # Output files must exist — if missing, always re-run
+        for out in step.outputs:
+            if not Path(out).exists():
+                log.debug("Cache MISS (%s): output missing → %s", step.name, out)
+                return False
 
-        current = self._fingerprint(step, script, deps, params)
-        stored = self._store.get(step)
+        current = _compute_fingerprint(step)
+        entry   = self._repo.get(step.name)
 
-        if stored == current:
-            log.debug("Cache HIT  (%s): hash=%s", step, current[:12])
+        if entry and entry.is_valid(current):
+            log.debug("Cache HIT  (%s): %s", step.name, current[:12])
             return True
 
+        stored = entry.fingerprint[:12] if entry else "none"
         log.debug(
-            "Cache MISS (%s): hash changed %s → %s", step, (stored or "none")[:12], current[:12]
+            "Cache MISS (%s): %s → %s",
+            step.name, stored, current[:12],
         )
         return False
 
-    def mark_done(
-        self,
-        step: str,
-        script: str,
-        deps: list[str],
-        params: list[str],
-    ) -> None:
+    def mark_done(self, step: StepDefinition) -> None:
         """Save the current fingerprint after a successful run."""
-        self._store[step] = self._fingerprint(step, script, deps, params)
-        self._save()
-        log.debug("Cache SAVE (%s): hash=%s", step, self._store[step][:12])
+        fingerprint = _compute_fingerprint(step)
+        self._repo.put(CacheEntry(step=step.name, fingerprint=fingerprint))
+        log.debug("Cache SAVE (%s): %s", step.name, fingerprint[:12])
 
-    def invalidate(self, step: str | None = None) -> None:
+    def invalidate(self, step_name: str | None = None) -> None:
         """Invalidate one step or the entire cache."""
-        if step:
-            self._store.pop(step, None)
-            log.info("Cache invalidated for step: %s", step)
+        if step_name:
+            self._repo.delete(step_name)
+            log.info("Cache invalidated: %s", step_name)
         else:
-            self._store.clear()
-            log.info("Entire pipeline cache invalidated.")
-        self._save()
+            self._repo.clear()
+            log.info("Entire cache invalidated.")
 
     def status(self) -> dict[str, str]:
-        """Return {step: short_hash} for all cached steps."""
-        return {k: v[:12] for k, v in self._store.items()}
+        """Return {step_name: short_hash} for all cached steps."""
+        return self._repo.all_entries()

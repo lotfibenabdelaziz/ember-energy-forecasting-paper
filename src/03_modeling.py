@@ -1,21 +1,30 @@
 """
-src/03_modeling.py — Classical ML Benchmark
+src/03_modeling.py — Train/Val/Test Split + Walk-Forward Benchmarking
+=========================================================================
 Ember Energy | IEEE Paper
 
-Models  : Ridge · RandomForest · XGBoost
-Split   : Train ≤ 2016 | Val 2017–2020 | Test 2021–2024
-Tuning  : GridSearchCV + TimeSeriesSplit on Train+Val data
-Validation: Walk-forward 1-step expanding window
+Mirrors exactly: notebooks/02_benchmarking_patched.ipynb
 
-Reads:  outputs/preprocessing/ember_model_ready.csv
-        outputs/preprocessing/feature_meta.json
-Writes: outputs/modeling/test_benchmarking.csv
-        outputs/modeling/val_benchmarking.csv
-        outputs/modeling/best_models.csv
-        outputs/modeling/best_hp.json
-        outputs/modeling/ember_config.json
-        outputs/modeling/figures/*.pdf
+Reads:   outputs/preprocessing/ember_model_ready.csv
+         outputs/preprocessing/feature_meta.json
+Writes:  outputs/modeling/test_benchmarking.csv
+         outputs/modeling/val_benchmarking.csv
+         outputs/modeling/best_models.csv
+         outputs/modeling/wf_test_predictions.csv
+         outputs/modeling/best_hp.json
+         outputs/modeling/figures/*.pdf
+
+Models (7):
+    Naive | LinearTrend | Holt | ARIMA(1,1,1) | Ridge | RandomForest | XGBoost
+
+Protocol:
+    1. Hyperparameter tuning (Ridge/RF/XGB) on Train→Val via TimeSeriesSplit
+    2. Walk-forward evaluation on Test set (2021-2024), expanding window
+    3. Walk-forward evaluation on Val set (2017-2020), for overfit check
+    4. Best model per country selected by lowest Test MAPE
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -30,17 +39,17 @@ import pandas as pd
 import seaborn as sns
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Ridge
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 try:
     import xgboost as xgb
-
     HAS_XGB = True
 except ImportError:
     HAS_XGB = False
-    logging.warning("XGBoost not installed — pip install xgboost")
 
 warnings.filterwarnings("ignore")
 
@@ -52,35 +61,27 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
-COLORS = {
-    "Tunisia": "#1f77b4",
-    "Austria": "#d62728",
-    "Germany": "#2ca02c",
-    "Egypt": "#9467bd",
-    "Canada": "#e6a817",
-    "France": "#8c564b",
-    "Kuwait": "#17becf",
+TARGET    = "Demand"
+
+PALETTE = {
+    "Tunisia": "#e63946", "Austria": "#2196F3", "Germany": "#4CAF50",
+    "Egypt":   "#9C27B0", "Canada":  "#00BCD4", "France":  "#797148",
+    "Kuwait":  "#4C4879",
 }
-MODEL_COLORS = {"Ridge": "#aec7e8", "RandomForest": "#2ca02c", "XGBoost": "#9467bd"}
 
-plt.rcParams.update(
-    {
-        "font.family": "serif",
-        "font.serif": ["Times New Roman", "DejaVu Serif"],
-        "font.size": 10,
-        "axes.titlesize": 11,
-        "axes.labelsize": 10,
-        "figure.dpi": 150,
-        "axes.grid": True,
-        "grid.linestyle": "--",
-        "grid.alpha": 0.4,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-    }
-)
+plt.rcParams.update({
+    "font.family":       "serif",
+    "font.serif":        ["Times New Roman", "DejaVu Serif"],
+    "font.size":         10,
+    "figure.dpi":        150,
+    "axes.grid":         True,
+    "grid.linestyle":    "--",
+    "grid.alpha":        0.4,
+})
+sns.set_theme(style="whitegrid", palette="tab10")
 
 
-def savefig(fig, path: str) -> None:
+def savefig(fig: plt.Figure, path: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
@@ -88,392 +89,486 @@ def savefig(fig, path: str) -> None:
 
 
 # ── Metrics ───────────────────────────────────────────────────────────────────
-def safe_mape(a, b):
-    a, b = np.array(a, float), np.array(b, float)
-    mask = np.abs(a) > np.abs(a).mean() * 0.01
-    if mask.sum() == 0:
-        return np.nan
-    return float(np.mean(np.abs((a[mask] - b[mask]) / a[mask])) * 100)
+
+def mape(y_true, y_pred) -> float:
+    yt, yp = np.array(y_true), np.array(y_pred)
+    m = yt != 0
+    if m.sum() == 0:
+        return float("nan")
+    return float(np.mean(np.abs((yt[m] - yp[m]) / yt[m])) * 100)
 
 
-def safe_smape(a, b):
-    a, b = np.array(a, float), np.array(b, float)
-    denom = np.abs(a) + np.abs(b)
-    mask = denom > 1e-8
-    if mask.sum() == 0:
-        return np.nan
-    return float(np.mean(2 * np.abs(a[mask] - b[mask]) / denom[mask]) * 100)
+def rmse(yt, yp) -> float:
+    return float(np.sqrt(mean_squared_error(yt, yp)))
 
 
-def theil_u(a, b):
-    a, b = np.array(a, float), np.array(b, float)
-    if len(a) < 2:
-        return np.nan
-    num = np.sqrt(np.mean((a[1:] - b[1:]) ** 2))
-    den = np.sqrt(np.mean((a[1:] - a[:-1]) ** 2))
-    return float(num / (den + 1e-8))
+# ── Feature cleaning ───────────────────────────────────────────────────────────
+
+def clean_features(X: np.ndarray) -> np.ndarray:
+    """Replace Inf/-Inf with NaN, then impute column medians. Mirrors notebook."""
+    X = X.astype(float)
+    X[~np.isfinite(X)] = np.nan
+    col_medians = np.nanmedian(X, axis=0)
+    nan_mask    = np.isnan(X)
+    X[nan_mask] = np.take(col_medians, np.where(nan_mask)[1])
+    return X
 
 
-def compute_metrics(name: str, y_true, y_pred) -> dict:
-    a, b = np.array(y_true, float), np.array(y_pred, float)
-    return {
-        "Model": name,
-        "MAE": round(mean_absolute_error(a, b), 3),
-        "RMSE": round(np.sqrt(mean_squared_error(a, b)), 3),
-        "R2": round(r2_score(a, b), 4),
-        "MAPE": round(safe_mape(a, b), 2),
-        "SMAPE": round(safe_smape(a, b), 2),
-        "TheilU": round(theil_u(a, b), 4),
-    }
-
-
-# ── Data helpers ──────────────────────────────────────────────────────────────
-def prepare_xy(df: pd.DataFrame, feat_cols: list, target: str):
-    X = df[feat_cols].replace([np.inf, -np.inf], np.nan).fillna(0).values
-    y = df[target].values
+def prepare_xy(
+    subset: pd.DataFrame, feature_cols: list[str], target: str
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return clean X, y arrays — drop rows where target is NaN."""
+    sub = subset[feature_cols + [target]].copy()
+    sub = sub[sub[target].notna()]
+    X = clean_features(sub[feature_cols].values)
+    y = sub[target].values
     return X, y
 
 
-def ml_1step(train_df, test_row, cls, feat_cols, scaler=None, **kwargs):
-    X_tr, y_tr = prepare_xy(train_df, feat_cols, TARGET)
-    X_te = test_row[feat_cols].values.reshape(1, -1)
-    X_te = np.where(np.isfinite(X_te), X_te, 0)
-    if scaler is not None:
-        scaler.fit(X_tr)
-        X_tr = scaler.transform(X_tr)
-        X_te = scaler.transform(X_te)
-    m = cls(**kwargs).fit(X_tr, y_tr)
-    return float(m.predict(X_te)[0])
+# ── Statistical 1-step forecasters ────────────────────────────────────────────
+
+def naive_1step(train_series: pd.Series) -> float:
+    return train_series.iloc[-1]
+
+
+def linear_trend_1step(train_series: pd.Series) -> float:
+    from sklearn.linear_model import LinearRegression
+    X = np.arange(len(train_series)).reshape(-1, 1)
+    m = LinearRegression().fit(X, train_series.values)
+    return float(m.predict([[len(train_series)]])[0])
+
+
+def holt_1step(train_series: pd.Series) -> float:
+    try:
+        m = ExponentialSmoothing(
+            train_series.values, trend="add", damped_trend=True
+        ).fit(optimized=True)
+        return float(m.forecast(1)[0])
+    except Exception:
+        return train_series.iloc[-1]
+
+
+def arima_1step(train_series: pd.Series) -> float:
+    try:
+        m = ARIMA(np.asarray(train_series.values), order=(1, 1, 1)).fit()
+        return float(m.forecast(1)[0])
+    except Exception:
+        return train_series.iloc[-1]
+
+
+def ml_1step(
+    train_df: pd.DataFrame,
+    test_row: pd.Series,
+    model_cls,
+    feature_cols: list[str],
+    target: str,
+    scaler: StandardScaler | None = None,
+    **kwargs,
+) -> float:
+    """1-step ML prediction — robust to Inf/NaN via clean_features()."""
+    tr   = train_df[feature_cols + [target]].copy()
+    tr   = tr[tr[target].notna()]
+    X_tr = clean_features(tr[feature_cols].values)
+    y_tr = tr[target].values
+
+    if len(X_tr) < 3:
+        return float(y_tr[-1]) if len(y_tr) else 0.0
+
+    if scaler:
+        X_tr = scaler.fit_transform(X_tr)
+
+    model = model_cls(**kwargs)
+    model.fit(X_tr, y_tr)
+
+    x_pred = clean_features(
+        np.array(test_row[feature_cols].values, dtype=float).reshape(1, -1)
+    )
+    if scaler:
+        x_pred = scaler.transform(x_pred)
+
+    return float(model.predict(x_pred)[0])
 
 
 # ── Hyperparameter tuning ─────────────────────────────────────────────────────
-def tune_models(
-    df: pd.DataFrame, feat_cols: list, target: str, train_end: int, val_end: int
-) -> dict:
+
+def tune_hyperparameters(
+    df: pd.DataFrame, all_features: list[str], target: str, val_end: int, model_dir: str
+) -> tuple[dict, list[str]]:
+    """
+    Tune Ridge, RF, XGBoost on Train→Val via TimeSeriesSplit.
+    Mirrors notebook Section 2 exactly.
+
+    Returns (best_hp dict, GOOD_FEATURES list)
+    """
+    df_tune    = df[df["Year"] <= val_end].copy()
+    feat_check = df_tune[all_features].replace([np.inf, -np.inf], np.nan)
+    null_frac  = feat_check.isnull().mean()
+    good_features = [c for c in all_features if null_frac[c] < 0.80]
+    dropped = set(all_features) - set(good_features)
+    if dropped:
+        log.warning("Dropped %d high-null features: %s", len(dropped), dropped)
+    log.info("Features used for tuning: %d", len(good_features))
+
+    X_tune, y_tune = prepare_xy(df_tune, good_features, target)
+    log.info("Tune set shape: X=%s, y=%s", X_tune.shape, y_tune.shape)
+
     tscv = TimeSeriesSplit(n_splits=3)
-    df_tune = df[df["Year"] <= val_end].copy()
-
-    # Clean features
-    null_frac = df_tune[feat_cols].isnull().mean()
-    good_feat = [c for c in feat_cols if null_frac[c] < 0.80]
-    log.info("Features for tuning: %d / %d", len(good_feat), len(feat_cols))
-
-    X_tune, y_tune = prepare_xy(df_tune, good_feat, target)
 
     # Ridge
-    ridge_gs = GridSearchCV(
-        Ridge(),
-        {"alpha": [0.01, 0.1, 1, 10, 100]},
-        cv=tscv,
-        scoring="neg_root_mean_squared_error",
-        n_jobs=-1,
+    ridge_grid = GridSearchCV(
+        Ridge(), {"alpha": [0.01, 0.1, 1, 10, 100]},
+        cv=tscv, scoring="neg_mean_absolute_error", refit=True,
     )
-    ridge_gs.fit(StandardScaler().fit_transform(X_tune), y_tune)
-    best_ridge = ridge_gs.best_params_
-    log.info("Best Ridge alpha: %s", best_ridge)
+    ridge_grid.fit(X_tune, y_tune)
+    best_ridge_alpha = ridge_grid.best_params_["alpha"]
+    log.info("Best Ridge alpha: %s", best_ridge_alpha)
 
     # Random Forest
-    rf_gs = GridSearchCV(
+    rf_grid = GridSearchCV(
         RandomForestRegressor(random_state=42, n_jobs=-1),
-        {"n_estimators": [50, 100, 200], "max_depth": [3, 5, None], "min_samples_leaf": [1, 2, 3]},
-        cv=tscv,
-        scoring="neg_root_mean_squared_error",
-        n_jobs=-1,
+        {"n_estimators": [50, 100], "max_depth": [None, 5, 10]},
+        cv=tscv, scoring="neg_mean_absolute_error", refit=True,
     )
-    rf_gs.fit(X_tune, y_tune)
-    best_rf = rf_gs.best_params_
-    log.info("Best RF params: %s", best_rf)
+    rf_grid.fit(X_tune, y_tune)
+    best_rf_params = rf_grid.best_params_
+    log.info("Best RF params: %s", best_rf_params)
 
     # XGBoost
-    best_xgb = {}
+    best_xgb_params: dict = {}
     if HAS_XGB:
-        xgb_gs = GridSearchCV(
+        xgb_grid = GridSearchCV(
             xgb.XGBRegressor(verbosity=0, random_state=42, tree_method="hist"),
-            {
-                "n_estimators": [50, 100, 200],
-                "learning_rate": [0.01, 0.05, 0.1],
-                "max_depth": [2, 3, 4],
-                "reg_alpha": [0, 0.5, 1.0],
-                "reg_lambda": [1.0, 5.0],
-            },
-            cv=tscv,
-            scoring="neg_root_mean_squared_error",
-            n_jobs=-1,
+            {"n_estimators": [50, 100], "learning_rate": [0.05, 0.1], "max_depth": [3, 5]},
+            cv=tscv, scoring="neg_mean_absolute_error", refit=True,
         )
-        xgb_gs.fit(X_tune, y_tune)
-        best_xgb = xgb_gs.best_params_
-        log.info("Best XGB params: %s", best_xgb)
+        xgb_grid.fit(X_tune, y_tune)
+        best_xgb_params = xgb_grid.best_params_
+        log.info("Best XGB params: %s", best_xgb_params)
+    else:
+        log.warning("XGBoost not installed — skipping tuning")
 
-    return {
-        "good_features": good_feat,
-        "Ridge": best_ridge,
-        "RandomForest": best_rf,
-        "XGBoost": best_xgb,
+    best_hp = {
+        "Ridge":        {"alpha": best_ridge_alpha},
+        "RandomForest": best_rf_params,
+        "XGBoost":      best_xgb_params,
     }
 
+    with open(os.path.join(model_dir, "best_hp.json"), "w") as f:
+        json.dump(best_hp, f, indent=2)
+    log.info("Saved best_hp.json")
 
-# ── Walk-forward evaluation ───────────────────────────────────────────────────
-def walk_forward(
-    df: pd.DataFrame, feat_cols: list, target: str, years: list, best_hp: dict
+    return best_hp, good_features
+
+
+# ── Walk-forward evaluation ────────────────────────────────────────────────────
+
+def walk_forward_evaluate(
+    df: pd.DataFrame,
+    all_features: list[str],
+    target: str,
+    years: list[int],
+    best_hp: dict,
 ) -> pd.DataFrame:
-    good_feat = best_hp["good_features"]
-    rows = []
-    for yr in years:
-        train_df = df[df["Year"] < yr]
-        test_row = df[df["Year"] == yr]
-        if train_df.empty or test_row.empty:
-            continue
-        test_row_s = test_row.iloc[0]
-        preds = {}
+    """
+    Expanding-window walk-forward over `years`.
+    Mirrors notebook Sections 3 & 4 (shared logic for test + val).
+    """
+    best_ridge_alpha = best_hp["Ridge"]["alpha"]
+    best_rf_params    = best_hp["RandomForest"]
+    best_xgb_params   = best_hp["XGBoost"]
 
-        # Ridge
-        try:
-            preds["Ridge"] = ml_1step(
-                train_df, test_row_s, Ridge, good_feat, scaler=StandardScaler(), **best_hp["Ridge"]
-            )
-        except Exception:
-            preds["Ridge"] = float(train_df[target].iloc[-1])
+    all_results: list[dict] = []
 
-        # Random Forest
-        try:
-            preds["RandomForest"] = ml_1step(
-                train_df,
-                test_row_s,
-                RandomForestRegressor,
-                good_feat,
-                scaler=None,
-                random_state=42,
-                n_jobs=-1,
-                **best_hp["RandomForest"],
-            )
-        except Exception:
-            preds["RandomForest"] = float(train_df[target].iloc[-1])
+    for country in COUNTRIES:
+        sub = df[df["Area"] == country].sort_values("Year").reset_index(drop=True)
 
-        # XGBoost
-        if HAS_XGB and best_hp["XGBoost"]:
+        for t_year in years:
+            train_df = sub[sub["Year"] < t_year]
+            test_row = sub[sub["Year"] == t_year]
+
+            if test_row.empty or len(train_df) < 5:
+                continue
+
+            y_actual     = test_row[target].values[0]
+            train_series = train_df[target]
+
+            preds: dict[str, float] = {}
+            preds["Naive"]       = naive_1step(train_series)
+            preds["LinearTrend"] = linear_trend_1step(train_series)
+            preds["Holt"]        = holt_1step(train_series)
+            preds["ARIMA_1_1_1"] = arima_1step(train_series)
+
             try:
-                preds["XGBoost"] = ml_1step(
-                    train_df,
-                    test_row_s,
-                    xgb.XGBRegressor,
-                    good_feat,
-                    scaler=None,
-                    verbosity=0,
-                    random_state=42,
-                    tree_method="hist",
-                    **best_hp["XGBoost"],
+                preds["Ridge"] = ml_1step(
+                    train_df, test_row.iloc[0], Ridge,
+                    all_features, target, scaler=StandardScaler(),
+                    alpha=best_ridge_alpha,
                 )
             except Exception:
-                preds["XGBoost"] = float(train_df[target].iloc[-1])
-        else:
-            preds["XGBoost"] = float(train_df[target].iloc[-1])
+                preds["Ridge"] = train_series.iloc[-1]
 
-        rows.append(
-            {
-                "Country": test_row_s["Area"],
-                "Year": yr,
-                "y_true": float(test_row_s[target]),
-                **preds,
-            }
-        )
+            try:
+                preds["RandomForest"] = ml_1step(
+                    train_df, test_row.iloc[0], RandomForestRegressor,
+                    all_features, target, scaler=None,
+                    random_state=42, n_jobs=-1, **best_rf_params,
+                )
+            except Exception:
+                preds["RandomForest"] = train_series.iloc[-1]
+
+            if HAS_XGB:
+                try:
+                    preds["XGBoost"] = ml_1step(
+                        train_df, test_row.iloc[0], xgb.XGBRegressor,
+                        all_features, target, scaler=None,
+                        verbosity=0, random_state=42, tree_method="hist",
+                        **best_xgb_params,
+                    )
+                except Exception:
+                    preds["XGBoost"] = train_series.iloc[-1]
+
+            for model_name, y_pred in preds.items():
+                all_results.append({
+                    "Country":  country,
+                    "Year":     t_year,
+                    "Model":    model_name,
+                    "y_actual": y_actual,
+                    "y_pred":   float(y_pred),
+                    "error":    y_actual - float(y_pred),
+                    "abs_pct_error": abs(y_actual - float(y_pred)) / (abs(y_actual) + 1e-9) * 100,
+                })
+
+    return pd.DataFrame(all_results)
+
+
+def agg_metrics(df_r: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate MAE/RMSE/MAPE per Country x Model. Mirrors notebook agg_metrics()."""
+    rows = []
+    for (country, model), g in df_r.groupby(["Country", "Model"]):
+        rows.append({
+            "Country": country,
+            "Model":   model,
+            "MAE":     mean_absolute_error(g["y_actual"], g["y_pred"]),
+            "RMSE":    rmse(g["y_actual"], g["y_pred"]),
+            "MAPE":    mape(g["y_actual"], g["y_pred"]),
+        })
     return pd.DataFrame(rows)
 
 
-# ── Evaluation & best model selection ────────────────────────────────────────
-def evaluate_split(df_results: pd.DataFrame, split_name: str) -> pd.DataFrame:
-    model_cols = ["Ridge", "RandomForest", "XGBoost"]
-    all_metrics = []
-    for c in COUNTRIES:
-        df_c = df_results[df_results["Country"] == c]
-        if df_c.empty:
-            continue
-        y_true = df_c["y_true"].values
-        for m in model_cols:
-            if m not in df_c.columns:
-                continue
-            met = compute_metrics(m, y_true, df_c[m].values)
-            met["Country"] = c
-            met["Split"] = split_name
-            all_metrics.append(met)
-    return pd.DataFrame(all_metrics)
+# ── Plots ─────────────────────────────────────────────────────────────────────
 
-
-# ── Plots ──────────────────────────────────────────────────────────────────────
-def plot_predictions(
-    df_full: pd.DataFrame,
-    df_test: pd.DataFrame,
-    target: str,
-    train_end: int,
-    val_end: int,
-    fig_dir: str,
-) -> None:
-    model_cols = [c for c in df_test.columns if c in ["Ridge", "RandomForest", "XGBoost"]]
-    mstyles = {
-        "Ridge": ("#aec7e8", "o"),
-        "RandomForest": ("#2ca02c", "s"),
-        "XGBoost": ("#9467bd", "^"),
-    }
-
-    for country in COUNTRIES:
-        hist = df_full[df_full["Area"] == country].sort_values("Year")
-        pred = df_test[df_test["Country"] == country].sort_values("Year")
-        if hist.empty or pred.empty:
-            continue
-
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(hist["Year"], hist[target], color="black", lw=1.8, label="Actual")
-        ax.axvspan(train_end + 0.5, val_end + 0.5, alpha=0.06, color="orange")
-        ax.axvspan(val_end + 0.5, 2025, alpha=0.06, color="red")
+def plot_split_viz(df: pd.DataFrame, target: str, train_end: int, val_end: int, fig_dir: str) -> None:
+    fig, axes = plt.subplots(2, 4, figsize=(20, 8), sharey=False)
+    axes = axes.flatten()
+    zone_c = {"Train": "#3a86ff", "Val": "#ff9f1c", "Test": "#e63946"}
+    for i, country in enumerate(COUNTRIES):
+        ax  = axes[i]
+        sub = df[df["Area"] == country].sort_values("Year")
+        tr  = sub[sub["Year"] <= train_end]
+        va  = sub[(sub["Year"] > train_end) & (sub["Year"] <= val_end)]
+        te  = sub[sub["Year"] > val_end]
+        ax.plot(tr["Year"], tr[target], color=zone_c["Train"], lw=2, label="Train")
+        ax.plot(va["Year"], va[target], color=zone_c["Val"],   lw=2, label="Val")
+        ax.plot(te["Year"], te[target], color=zone_c["Test"],  lw=2, label="Test")
         ax.axvline(train_end + 0.5, color="grey", ls="--", lw=1)
-        ax.axvline(val_end + 0.5, color="grey", ls=":", lw=1)
-
-        for m in model_cols:
-            color, marker = mstyles.get(m, ("grey", "o"))
-            ax.plot(
-                pred["Year"], pred[m], color=color, ls="--", marker=marker, ms=5, lw=1.4, label=m
-            )
-
-        ax.set_title(f"{country} — ML Predictions vs Actual", fontweight="bold")
-        ax.set_xlabel("Year")
-        ax.set_ylabel("TWh")
-        ax.legend(frameon=False, ncol=4, fontsize=8)
-        ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True, nbins=10))
-        plt.tight_layout()
-        savefig(fig, os.path.join(fig_dir, f"mod_fig_{country.lower()}_pred.pdf"))
+        ax.axvline(val_end   + 0.5, color="grey", ls=":",  lw=1)
+        ax.set_title(country, fontweight="bold")
+        ax.set_xlabel("Year"); ax.set_ylabel("TWh")
+        ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=5, integer=True))
+        if i == 0:
+            ax.legend(fontsize=8)
+    axes[-1].set_visible(False)
+    fig.suptitle("Train / Validation / Test Split by Country", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    savefig(fig, os.path.join(fig_dir, "mdl_fig_split.pdf"))
 
 
-def plot_metrics_heatmap(df_metrics: pd.DataFrame, fig_dir: str) -> None:
-    for metric in ["MAPE", "RMSE", "R2"]:
-        pivot = df_metrics[df_metrics["Split"] == "Test"].pivot_table(
-            index="Model", columns="Country", values=metric
+def plot_mape_heatmaps(test_metrics: pd.DataFrame, val_metrics: pd.DataFrame, fig_dir: str) -> None:
+    mape_piv     = test_metrics.pivot(index="Country", columns="Model", values="MAPE")
+    val_mape_piv = val_metrics.pivot(index="Country",  columns="Model", values="MAPE")
+    fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+    sns.heatmap(mape_piv, cmap="RdYlGn_r", annot=True, fmt=".1f", ax=axes[0],
+                linewidths=0.4, cbar_kws={"label": "MAPE %"})
+    axes[0].set_title("TEST — MAPE (%) per Country × Model", fontweight="bold")
+    sns.heatmap(val_mape_piv, cmap="RdYlGn_r", annot=True, fmt=".1f", ax=axes[1],
+                linewidths=0.4, cbar_kws={"label": "MAPE %"})
+    axes[1].set_title("VALIDATION — MAPE (%) per Country × Model", fontweight="bold")
+    plt.tight_layout()
+    savefig(fig, os.path.join(fig_dir, "mdl_fig_mape_heatmap.pdf"))
+
+
+def plot_val_vs_test(val_metrics: pd.DataFrame, test_metrics: pd.DataFrame, fig_dir: str) -> None:
+    merged = (
+        val_metrics[["Country", "Model", "MAPE"]].rename(columns={"MAPE": "Val_MAPE"})
+        .merge(
+            test_metrics[["Country", "Model", "MAPE"]].rename(columns={"MAPE": "Test_MAPE"}),
+            on=["Country", "Model"],
         )
-        if pivot.empty:
-            continue
-        fig, ax = plt.subplots(figsize=(11, 3.5))
-        cmap = "RdYlGn" if metric == "R2" else "YlOrRd"
-        center = 0 if metric == "R2" else None
-        sns.heatmap(
-            pivot,
-            annot=True,
-            fmt=".2f",
-            cmap=cmap,
-            center=center,
-            linewidths=0.4,
-            ax=ax,
-            annot_kws={"size": 8},
-        )
-        ax.set_title(f"{metric} — Test Set (2021–2024)", fontweight="bold")
-        plt.tight_layout()
-        savefig(fig, os.path.join(fig_dir, f"mod_heatmap_{metric.lower()}.pdf"))
+    )
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for m in merged["Model"].unique():
+        sub = merged[merged["Model"] == m]
+        ax.scatter(sub["Val_MAPE"], sub["Test_MAPE"], label=m, s=60)
+    max_v = merged[["Val_MAPE", "Test_MAPE"]].max().max()
+    ax.plot([0, max_v], [0, max_v], "k--", lw=0.8, label="Val=Test line")
+    ax.set_xlabel("Val MAPE (%)")
+    ax.set_ylabel("Test MAPE (%)")
+    ax.set_title("Val vs Test MAPE — Overfitting Check", fontweight="bold")
+    ax.legend(fontsize=8, bbox_to_anchor=(1.01, 1))
+    plt.tight_layout()
+    savefig(fig, os.path.join(fig_dir, "mdl_fig_val_vs_test.pdf"))
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+def plot_walk_forward_test(
+    df: pd.DataFrame, res: pd.DataFrame, best_test: pd.DataFrame,
+    target: str, train_end: int, val_end: int, test_end: int, fig_dir: str,
+) -> None:
+    fig, axes = plt.subplots(2, 4, figsize=(22, 9))
+    axes = axes.flatten()
+    clrs = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    for i, country in enumerate(COUNTRIES):
+        ax = axes[i]
+        full   = df[df["Area"] == country].sort_values("Year")
+        best_m = best_test[best_test["Country"] == country]["Model"].values[0]
+        ax.plot(full["Year"], full[target], "k-", lw=2, label="Actual", zorder=5)
+        c_res = res[res["Country"] == country]
+        for j, model in enumerate(c_res["Model"].unique()):
+            m_res = c_res[c_res["Model"] == model]
+            lw = 2.5 if model == best_m else 1
+            ls = "-"  if model == best_m else "--"
+            ax.plot(m_res["Year"], m_res["y_pred"], ls=ls, lw=lw,
+                    color=clrs[j % len(clrs)], label=model, alpha=0.85)
+        ax.axvspan(val_end + 0.5, test_end + 0.5, alpha=0.06, color="red", label="Test zone")
+        ax.axvspan(train_end + 0.5, val_end + 0.5, alpha=0.06, color="orange", label="Val zone")
+        ax.set_title(f"{country}\n[Best: {best_m}]", fontweight="bold", fontsize=9)
+        ax.set_xlabel("Year"); ax.set_ylabel("TWh")
+        ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=5, integer=True))
+        if i == 0:
+            ax.legend(fontsize=6, ncol=2)
+    axes[-1].set_visible(False)
+    fig.suptitle("Walk-Forward Test Predictions vs Actual (all models)", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    savefig(fig, os.path.join(fig_dir, "mdl_fig_walk_forward.pdf"))
+
+
+def plot_residuals(
+    df: pd.DataFrame, res: pd.DataFrame, best_test: pd.DataFrame, fig_dir: str
+) -> None:
+    fig, axes = plt.subplots(2, 4, figsize=(18, 7))
+    axes = axes.flatten()
+    for i, country in enumerate(COUNTRIES):
+        best_m = best_test[best_test["Country"] == country]["Model"].values[0]
+        r = res[(res["Country"] == country) & (res["Model"] == best_m)]
+        clrs_bar = ["tomato" if e < 0 else "steelblue" for e in r["error"]]
+        axes[i].bar(r["Year"], r["error"], color=clrs_bar)
+        axes[i].axhline(0, color="black", lw=0.8)
+        axes[i].set_title(f"{country} — {best_m}", fontweight="bold", fontsize=9)
+        axes[i].set_xlabel("Year"); axes[i].set_ylabel("Residual (TWh)")
+    axes[-1].set_visible(False)
+    fig.suptitle("Test Residuals — Best Model per Country", fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    savefig(fig, os.path.join(fig_dir, "mdl_fig_residuals.pdf"))
+
+
+def plot_skill_score(test_metrics: pd.DataFrame, fig_dir: str) -> None:
+    naive_mape = (
+        test_metrics[test_metrics["Model"] == "Naive"][["Country", "MAPE"]]
+        .rename(columns={"MAPE": "naive_mape"})
+    )
+    skill_df = test_metrics.merge(naive_mape, on="Country", how="inner")
+    skill_df["skill"] = (1 - skill_df["MAPE"] / skill_df["naive_mape"]) * 100
+    skill_df = skill_df.replace([np.inf, -np.inf], np.nan).dropna(subset=["skill"])
+    skill_piv = skill_df.pivot(index="Country", columns="Model", values="skill")
+
+    if skill_piv.empty:
+        log.warning("Skill score pivot empty — skipping plot")
+        return
+
+    fig, ax = plt.subplots(figsize=(13, 4))
+    sns.heatmap(skill_piv, cmap="RdYlGn", annot=True, fmt=".1f", ax=ax,
+                center=0, linewidths=0.4, cbar_kws={"label": "Skill vs Naïve (%)"})
+    ax.set_title("Skill Score vs Naïve Baseline (Test Set) — Higher is Better",
+                 fontsize=12, fontweight="bold")
+    plt.tight_layout()
+    savefig(fig, os.path.join(fig_dir, "mdl_fig_skill_score.pdf"))
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Ember ML benchmark step")
-    p.add_argument("--input_dir", default="outputs/preprocessing", help="Preprocessing dir")
-    p.add_argument("--output_dir", default="outputs/modeling", help="Modeling output dir")
+    p = argparse.ArgumentParser(description="Ember modeling/benchmarking step")
+    p.add_argument("--input_dir",  default="outputs/preprocessing", help="Preprocessing output dir")
+    p.add_argument("--output_dir", default="outputs/modeling",      help="Output dir")
     return p.parse_args()
 
 
-TARGET = "Demand"
-
-
 def main() -> None:
-    args = parse_args()
+    args    = parse_args()
     fig_dir = os.path.join(args.output_dir, "figures")
     os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(fig_dir, exist_ok=True)
+    os.makedirs(fig_dir,         exist_ok=True)
 
     # Load
     df = pd.read_csv(os.path.join(args.input_dir, "ember_model_ready.csv"))
     with open(os.path.join(args.input_dir, "feature_meta.json")) as f:
         meta = json.load(f)
 
-    TRAIN_END = meta["TRAIN_END"]  # 2016
-    VAL_END = meta["VAL_END"]  # 2020
-    TEST_END = meta["TEST_END"]  # 2024
-    ALL_FEATURES = meta["all_features"]
+    all_features = meta["all_features"]
+    train_end = meta.get("TRAIN_END", 2016)
+    val_end   = meta.get("VAL_END", 2020)
+    test_end  = meta.get("TEST_END", 2024)
 
-    log.info(
-        "Split: Train ≤ %d | Val %d–%d | Test %d–%d",
-        TRAIN_END,
-        TRAIN_END + 1,
-        VAL_END,
-        VAL_END + 1,
-        TEST_END,
-    )
-    log.info("Features: %d", len(ALL_FEATURES))
+    log.info("Dataset shape: %s | Features: %d", df.shape, len(all_features))
+    log.info("Split: Train≤%d | Val %d-%d | Test %d-%d",
+             train_end, train_end + 1, val_end, val_end + 1, test_end)
 
-    # Tune on Train + Val combined
-    log.info("=== Hyperparameter Tuning (Train + Val) ===")
-    best_hp = tune_models(df, ALL_FEATURES, TARGET, TRAIN_END, VAL_END)
+    # 1. Split visualization
+    plot_split_viz(df, TARGET, train_end, val_end, fig_dir)
 
-    # Walk-forward on TEST (2021–2024)
-    test_years = list(range(VAL_END + 1, TEST_END + 1))
-    log.info("=== Walk-Forward Evaluation — Test %d–%d ===", VAL_END + 1, TEST_END)
-    all_test = []
-    for c in COUNTRIES:
-        df_c = df[df["Area"] == c].sort_values("Year").reset_index(drop=True)
-        results = walk_forward(df_c, ALL_FEATURES, TARGET, test_years, best_hp)
-        all_test.append(results)
-    df_test = pd.concat(all_test, ignore_index=True)
-
-    # Walk-forward on VAL (2017–2020)
-    val_years = list(range(TRAIN_END + 1, VAL_END + 1))
-    log.info("=== Walk-Forward Evaluation — Val %d–%d ===", TRAIN_END + 1, VAL_END)
-    all_val = []
-    for c in COUNTRIES:
-        df_c = df[df["Area"] == c].sort_values("Year").reset_index(drop=True)
-        results = walk_forward(df_c, ALL_FEATURES, TARGET, val_years, best_hp)
-        all_val.append(results)
-    df_val = pd.concat(all_val, ignore_index=True)
-
-    # Evaluate
-    test_metrics = evaluate_split(df_test, "Test")
-    val_metrics = evaluate_split(df_val, "Val")
-    df_metrics = pd.concat([test_metrics, val_metrics], ignore_index=True)
-
-    log.info(
-        "=== Test Metrics ===\n%s",
-        test_metrics[["Country", "Model", "MAE", "RMSE", "R2", "MAPE", "TheilU"]].to_string(
-            index=False
-        ),
+    # 2. Hyperparameter tuning
+    best_hp, good_features = tune_hyperparameters(
+        df, all_features, TARGET, val_end, args.output_dir
     )
 
-    # Best model per country (lowest MAPE on Test)
-    best_rows = []
-    for c in COUNTRIES:
-        df_c = test_metrics[test_metrics["Country"] == c]
-        if df_c.empty:
-            continue
-        idx = df_c["MAPE"].idxmin()
-        row = df_c.loc[idx].to_dict()
-        best_rows.append(row)
-    best_test = pd.DataFrame(best_rows)
-    log.info(
-        "=== Best Model per Country ===\n%s",
-        best_test[["Country", "Model", "MAPE", "RMSE", "R2"]].to_string(index=False),
-    )
+    # 3. Walk-forward on TEST
+    test_years = list(range(val_end + 1, test_end + 1))
+    log.info("── Walk-forward TEST evaluation: years %s", test_years)
+    res = walk_forward_evaluate(df, good_features, TARGET, test_years, best_hp)
+    log.info("Test walk-forward results: %s", res.shape)
+
+    # 4. Walk-forward on VAL
+    val_years = list(range(train_end + 1, val_end + 1))
+    log.info("── Walk-forward VAL evaluation: years %s", val_years)
+    val_res = walk_forward_evaluate(df, good_features, TARGET, val_years, best_hp)
+    log.info("Val walk-forward results: %s", val_res.shape)
+
+    # 5. Aggregate metrics
+    test_metrics = agg_metrics(res)
+    val_metrics  = agg_metrics(val_res)
+    best_test = test_metrics.loc[
+        test_metrics.groupby("Country")["MAPE"].idxmin()
+    ].reset_index(drop=True)
+    log.info("Best model per country (Test MAPE):\n%s", best_test.to_string())
 
     # Plots
-    plot_predictions(df, df_test, TARGET, TRAIN_END, VAL_END, fig_dir)
-    plot_metrics_heatmap(df_metrics, fig_dir)
+    plot_mape_heatmaps(test_metrics, val_metrics, fig_dir)
+    plot_val_vs_test(val_metrics, test_metrics, fig_dir)
+    plot_walk_forward_test(df, res, best_test, TARGET, train_end, val_end, test_end, fig_dir)
+    plot_residuals(df, res, best_test, fig_dir)
+    plot_skill_score(test_metrics, fig_dir)
 
-    # Save
-    df_test.to_csv(os.path.join(args.output_dir, "test_benchmarking.csv"), index=False)
-    df_val.to_csv(os.path.join(args.output_dir, "val_benchmarking.csv"), index=False)
-    best_test.to_csv(os.path.join(args.output_dir, "best_models.csv"), index=False)
+    # 6. Save
+    test_metrics.to_csv(os.path.join(args.output_dir, "test_benchmarking.csv"), index=False)
+    val_metrics.to_csv(os.path.join(args.output_dir, "val_benchmarking.csv"),   index=False)
+    best_test.to_csv(os.path.join(args.output_dir, "best_models.csv"),          index=False)
+    res.to_csv(os.path.join(args.output_dir, "wf_test_predictions.csv"),        index=False)
 
-    with open(os.path.join(args.output_dir, "best_hp.json"), "w") as f:
-        json.dump(best_hp, f, indent=2, default=str)
-
-    # Update config for downstream notebooks
-    meta["BEST_MODELS"] = best_test.set_index("Country")["Model"].to_dict()
-    meta["BEST_HP"] = best_hp
-    with open(os.path.join(args.output_dir, "ember_config.json"), "w") as f:
-        json.dump(meta, f, indent=2, default=str)
-
-    log.info("Modeling complete → %s", args.output_dir)
+    log.info("=== Modeling Complete ===")
+    log.info("  test_benchmarking.csv   : %s", test_metrics.shape)
+    log.info("  val_benchmarking.csv    : %s", val_metrics.shape)
+    log.info("  best_models.csv         : %s", best_test.shape)
+    log.info("  wf_test_predictions.csv : %s", res.shape)
+    log.info("  Saved → %s", args.output_dir)
 
 
 if __name__ == "__main__":

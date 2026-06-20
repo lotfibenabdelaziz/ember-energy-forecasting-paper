@@ -24,7 +24,7 @@ else
 endif
 
 export PATH := $(PATH)$(SEP)C:/Program Files/Docker/Docker/resources/bin
-
+PYTEST_OPTS = -p no:cacheprovider
 # ── Image config ──────────────────────────────────────────────────────────────
 IMAGE_NAME  ?= ember-energy-pipeline
 IMAGE_TAG   ?= latest
@@ -288,7 +288,7 @@ cache-invalidate-deeplearning:
 # =============================================================================
 test:
 	@echo "── [test] Running full test suite with coverage…"
-	pytest tests/ -v --tb=short \
+	pytest tests/ $(PYTEST_OPTS) -v --tb=short \
 	    --cov=src --cov=api --cov=pipeline --cov=mlflow_config \
 	    --cov-report=term-missing \
 	    --cov-report=html:htmlcov \
@@ -298,7 +298,7 @@ test:
 
 test-fast:
 	@echo "── [test-fast] Running fast unit tests (stop on first failure)…"
-	pytest tests/ -v --tb=short -x -q \
+	pytest tests/ $(PYTEST_OPTS) -v --tb=short -x -q \
 	    --ignore=tests/test_api.py \
 	    --ignore=tests/test_pipeline.py \
 	    --ignore=tests/test_deeplearning.py \
@@ -353,32 +353,37 @@ test-cov:
 	@echo "✓  Coverage report → htmlcov/index.html"
 
 # =============================================================================
-# CODE QUALITY
+# CODE QUALITY — powered by RUFF
 # =============================================================================
+RUFF_TARGETS = src/ api/ pipeline.py pipeline_cache.py mlflow_config.py
+
 lint:
-	@echo "── [lint] Running flake8 (max-line=100, ignore E501/W503)…"
-	flake8 src/ api/ pipeline.py pipeline_cache.py mlflow_config.py \
-	    --max-line-length=100 \
-	    --ignore=E501,W503
-	@echo "✓  Lint passed — no issues found."
+	@echo "── [lint] Running ruff check…"
+	ruff check $(RUFF_TARGETS)
+	@echo "✓  Lint passed."
 
 lint-fix:
-	@echo "── [lint-fix] Sorting imports with isort…"
-	isort src/ api/ pipeline.py pipeline_cache.py mlflow_config.py
-	@echo "── [lint-fix] Formatting with black (line-length=100)…"
-	black src/ api/ pipeline.py pipeline_cache.py mlflow_config.py --line-length 100
-	@echo "✓  Code formatted successfully."
+	@echo "── [lint-fix] Auto-fixing with ruff…"
+	ruff check --fix $(RUFF_TARGETS)
+	@echo "── [lint-fix] Formatting with ruff format…"
+	ruff format $(RUFF_TARGETS)
+	@echo "✓  Code fixed and formatted."
 
 format: lint-fix
 
+format-check:
+	@echo "── [format-check] Checking format without changes…"
+	ruff format --check $(RUFF_TARGETS)
+	ruff check $(RUFF_TARGETS)
+	@echo "✓  Format check passed."
+
 typecheck:
-	@echo "── [typecheck] Running mypy static type analysis…"
+	@echo "── [typecheck] Running mypy…"
 	mypy src/ api/ mlflow_config.py --config-file mypy.ini
 	@echo "✓  Type check passed."
 
 check: lint typecheck test-fast
-	@echo ""
-	@echo "✓  All quality gates passed: lint · typecheck · unit tests."
+	@echo "✓  All quality gates passed."
 
 # =============================================================================
 # API

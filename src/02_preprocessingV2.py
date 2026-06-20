@@ -79,7 +79,7 @@ def quality_report(df: pd.DataFrame, label: str) -> None:
 
 # Step 0 — Load filtered CSV
 def load_filtered(input_dir: str) -> pd.DataFrame:
-    path = os.path.join(input_dir, "ember_filtered.csv")
+    path = os.path.join(input_dir, "CSV_PATH")
     df   = pd.read_csv(path)
     df.columns = df.columns.str.strip()
     df["Year"]  = df["Year"].astype(int)
@@ -196,6 +196,15 @@ def build_features(
     # YoY % change
     for col in all_subs:
         df_feat[f"{col}_yoy"] = df_feat.groupby("Area")[col].pct_change() * 100
+    # ── Fix NaN yoy for zero/constant features (e.g. Kuwait Electricity_imports)
+    # pct_change on a constant-zero series yields NaN — replace with 0 (no change)
+    yoy_cols   = [c for c in df_feat.columns if c.endswith('_yoy')]
+    ratio_cols = [c for c in df_feat.columns if c.startswith('demand_ratio_')]
+    df_feat[yoy_cols + ratio_cols] = (
+        df_feat[yoy_cols + ratio_cols]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0)
+    )
 
     log.info("After lags + MA + YoY: %s", df_feat.shape)
 

@@ -35,14 +35,11 @@ jobs:
           pip install flake8 black isort mypy
           pip install -r requirements.txt
 
-      - name: flake8
-        run: flake8 src/ api/ pipeline.py pipeline_cache.py --max-line-length=100 --ignore=E501,W503
-
-      - name: black (check only)
-        run: black src/ api/ pipeline.py pipeline_cache.py --check --line-length 100
-
-      - name: isort (check only)
-        run: isort src/ api/ pipeline.py pipeline_cache.py --check-only --profile black
+      - name: ruff lint + format check
+        run: |
+          pip install ruff
+          ruff check src/ api/ pipeline.py pipeline_cache.py mlflow_config.py
+          ruff format --check src/ api/ pipeline.py pipeline_cache.py mlflow_config.py
 
   # ── 2. Unit tests ──────────────────────────────────────────────────────────
   unit-tests:

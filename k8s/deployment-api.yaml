@@ -27,11 +27,34 @@ spec:
           ports:
             - containerPort: 8000
 
+          # Load all configmap + secret values
           envFrom:
             - configMapRef:
                 name: ember-config
             - secretRef:
                 name: ember-secrets
+
+          # Explicit overrides to guarantee auth vars are set
+          env:
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ember-secrets
+                  key: ADMIN_PASSWORD
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ember-secrets
+                  key: ADMIN_USERNAME
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ember-secrets
+                  key: SECRET_KEY
+            - name: OUTPUT_ROOT
+              value: "outputs"
+            - name: OUTPUTS_DIR
+              value: "outputs"
 
           resources:
             requests:
