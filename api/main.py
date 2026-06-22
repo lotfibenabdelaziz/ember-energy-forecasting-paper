@@ -31,20 +31,20 @@ Run locally:
     uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 """
 
+from datetime import timedelta
 import logging
 import math
 import os
-from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
+import pandas as pd
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -68,7 +68,7 @@ log = logging.getLogger(__name__)
 _ROOT = Path(os.getenv("OUTPUT_ROOT", os.getenv("OUTPUTS_DIR", "outputs")))
 
 FORECAST_CSV = _ROOT / "forecasting" / "demand_forecast_2025_2030.csv"
-METRICS_CSV = _ROOT / "forecasting" / "test_metrics.csv"
+METRICS_CSV = _ROOT / "modeling" / "test_benchmarking.csv"
 GROWTH_CSV = _ROOT / "forecasting" / "demand_growth_summary.csv"
 BEST_MODELS_CSV = _ROOT / "modeling" / "best_models.csv"
 BENCHMARKING_CSV = _ROOT / "modeling" / "test_benchmarking.csv"
@@ -136,19 +136,20 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
+
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS",
-    "http://localhost:8000,http://localhost:3000,http://127.0.0.1:8000",
+    "*" if os.getenv("ENV") == "development" else
+    "http://localhost:8000,http://127.0.0.1:8000"
 ).split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "X-API-Key", "Content-Type"],
-    allow_credentials=True,
-    max_age=600,
+    allow_origins     = ALLOWED_ORIGINS,
+    allow_methods     = ["GET", "POST", "OPTIONS"],
+    allow_headers     = ["Authorization", "X-API-Key", "Content-Type", "*"],
+    allow_credentials = True,
+    max_age           = 600,
 )
 
 
