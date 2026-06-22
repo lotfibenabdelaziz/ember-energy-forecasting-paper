@@ -16,11 +16,10 @@ import logging
 
 import numpy as np
 import pandas as pd
-import torch
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from torch.utils.data import DataLoader
+import torch
 
-from src.dataset import DemandDataset, clean_arr, make_loaders
+from src.dataset import clean_arr, make_loaders
 from src.train import train_model
 
 log = logging.getLogger(__name__)

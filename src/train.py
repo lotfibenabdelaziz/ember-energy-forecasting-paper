@@ -21,6 +21,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+# In log_dl_run_to_mlflow() — add at the top:
+import os
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "5")
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
 
 log = logging.getLogger(__name__)
 
@@ -144,7 +148,7 @@ def log_dl_run_to_mlflow(
 
 
 def log_all_dl_to_mlflow(
-    dl_metrics:  "pd.DataFrame",
+    dl_metrics:  pd.DataFrame,
     params:      dict,
     experiment:  str = "ember-demand-forecasting",
 ) -> None:
@@ -152,7 +156,6 @@ def log_all_dl_to_mlflow(
     Log all DL benchmarking results to MLflow — one run per (country, model).
     Mirrors mlflow_config.log_dl_model_metrics() logic.
     """
-    import pandas as pd
 
     for _, row in dl_metrics.iterrows():
         metrics = {

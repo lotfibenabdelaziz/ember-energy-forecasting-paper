@@ -20,12 +20,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import logging
 import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 

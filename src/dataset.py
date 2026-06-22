@@ -177,12 +177,24 @@ def make_loaders(
     n_tr    = len(ds_tr)
     idx_val = list(range(n_tr, len(ds_val)))
 
-    loader_tr = DataLoader(ds_tr, batch_size=batch_size, shuffle=True, drop_last=False)
-    loader_val = DataLoader(
-        Subset(ds_val, idx_val) if idx_val else ds_tr,  # fallback to train if no val windows
-        batch_size=batch_size,
-        shuffle=False,
+    # drop_last=True avoids a final batch of size 1, which crashes BatchNorm.
+    # If the dataset is too small for even one full batch, fall back to
+    # drop_last=False and let safe_loader() cap the batch size instead.
+    use_drop_last = n_tr > batch_size
+
+    loader_tr = DataLoader(
+        ds_tr, batch_size=batch_size, shuffle=True, drop_last=use_drop_last
     )
+
+    # Guard: if drop_last produced an EMPTY loader (n_tr <= batch_size),
+    # rebuild with a safe (capped) batch size instead.
+    if len(loader_tr) == 0:
+        safe_bs  = max(2, min(batch_size, n_tr))
+        loader_tr = DataLoader(ds_tr, batch_size=safe_bs, shuffle=True, drop_last=False)
+
+    val_subset = Subset(ds_val, idx_val) if idx_val else ds_tr
+    val_bs     = max(2, min(batch_size, len(val_subset)))
+    loader_val = DataLoader(val_subset, batch_size=val_bs, shuffle=False, drop_last=False)
 
     return loader_tr, loader_val, ds_tr.scaler_X, ds_tr.scaler_y
 
