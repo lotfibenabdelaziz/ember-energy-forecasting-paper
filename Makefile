@@ -399,11 +399,7 @@ api-run:
 mlflow-ui:
 	@echo "── [mlflow-ui] Starting MLflow tracking server…"
 	@echo "   UI → http://127.0.0.1:$(MLFLOW_PORT)"
-	mlflow server \
-	    --host 0.0.0.0 \
-	    --port $(MLFLOW_PORT) \
-	    --backend-store-uri ./mlruns \
-	    --default-artifact-root ./mlruns/artifacts
+	mlflow server --host 0.0.0.0 --port $(MLFLOW_PORT) --backend-store-uri ./mlruns --default-artifact-root ./mlruns/artifacts
 
 mlflow-list:
 	@echo "── [mlflow-list] Listing runs in experiment 'ember-demand-forecasting'…"
@@ -412,7 +408,7 @@ mlflow-list:
 
 mlflow-clean:
 	@echo "── [mlflow-clean] Deleting local mlruns/ directory…"
-	$(RM) mlruns/
+	python -c "import shutil; shutil.rmtree('mlruns', ignore_errors=True)"
 	@echo "✓  mlruns/ removed."
 
 # =============================================================================
