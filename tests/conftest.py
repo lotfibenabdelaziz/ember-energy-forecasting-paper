@@ -10,16 +10,23 @@ import tempfile
 import numpy as np
 import pandas as pd
 import pytest
+import logging
+logging.getLogger("api.main").setLevel(logging.ERROR)
 
-# ── Constants ─────────────────────────────────────────────────────────────────
 COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
-TARGET = "Demand"
-SUBCATS = ["Demand", "CO2 intensity", "Total", "Fuel", "Electricity imports"]
-YEARS = list(range(2000, 2025))
-
+TARGET    = "Demand"
+# Renamed subcategories (spaces→_, slashes→_) matching 02_preprocessing.py
+SUBCATS_RENAMED = [
+    "Demand", "CO2_intensity", "Fuel", "Electricity_imports"
+]
+# Raw subcategory names as they appear in ember_filtered.csv
+SUBCATS_RAW = [
+    "Demand", "CO2 intensity", "Fuel", "Electricity imports"
+]
+YEARS     = list(range(2000, 2025))
 TRAIN_END = 2016
-VAL_END = 2020
-TEST_END = 2024
+VAL_END   = 2020
+TEST_END  = 2024
 
 
 # ── Raw Ember CSV (long format) ───────────────────────────────────────────────
@@ -30,138 +37,143 @@ def raw_csv(tmp_path_factory):
     rows = []
     np.random.seed(42)
     for country in COUNTRIES:
-        base = {
-            "Tunisia": 12,
-            "Austria": 60,
-            "Germany": 500,
-            "Egypt": 80,
-            "Canada": 550,
-            "France": 460,
-            "Kuwait": 50,
-        }[country]
+        base = {"Tunisia": 12, "Austria": 60, "Germany": 500,
+                "Egypt": 80, "Canada": 550, "France": 460, "Kuwait": 50}[country]
         for year in YEARS:
-            for subcat in SUBCATS:
+            for subcat in SUBCATS_RAW:
                 noise = np.random.normal(0, base * 0.02)
                 value = base * (1 + 0.02 * (year - 2000)) + noise
-                rows.append(
-                    {
-                        "Area": country,
-                        "Year": year,
-                        "Subcategory": subcat,
-                        "Unit": "TWh",
-                        "Value": round(value, 3),
-                    }
-                )
-    df = pd.DataFrame(rows)
+                rows.append({
+                    "Area":        country,
+                    "Year":        year,
+                    "Subcategory": subcat,
+                    "Unit":        "TWh",
+                    "Value":       round(value, 3),
+                })
+    df   = pd.DataFrame(rows)
     path = str(tmp / "ember_yearly.csv")
     df.to_csv(path, index=False)
     return path
 
 
-# ── Filtered long-format CSV ──────────────────────────────────────────────────
+# ── Filtered long-format CSV (output of 01_eda.py) ───────────────────────────
 @pytest.fixture(scope="session")
 def ember_filtered(tmp_path_factory):
+    """Minimal ember_filtered.csv using RAW subcategory names."""
     tmp = tmp_path_factory.mktemp("eda")
     rows = []
     np.random.seed(42)
     for country in COUNTRIES:
-        base = {
-            "Tunisia": 12,
-            "Austria": 60,
-            "Germany": 500,
-            "Egypt": 80,
-            "Canada": 550,
-            "France": 460,
-            "Kuwait": 50,
-        }[country]
+        base = {"Tunisia": 12, "Austria": 60, "Germany": 500,
+                "Egypt": 80, "Canada": 550, "France": 460, "Kuwait": 50}[country]
         for year in YEARS:
-            for subcat in SUBCATS:
-                value = base * (1 + 0.02 * (year - 2000)) + np.random.normal(0, 0.5)
-                rows.append(
-                    {
-                        "Area": country,
-                        "Year": year,
-                        "Subcategory": subcat,
-                        "Unit": "TWh",
-                        "Value": round(value, 3),
-                    }
-                )
-    df = pd.DataFrame(rows)
+            for subcat in SUBCATS_RAW:
+                noise = np.random.normal(0, base * 0.02)
+                value = base * (1 + 0.02 * (year - 2000)) + noise
+                rows.append({
+                    "Area":        country,
+                    "Year":        year,
+                    "Subcategory": subcat,
+                    "Unit":        "TWh",
+                    "Value":       round(value, 3),
+                })
+    df   = pd.DataFrame(rows)
     path = str(tmp / "ember_filtered.csv")
     df.to_csv(path, index=False)
     return path
 
 
-# ── ember_model_ready.csv (wide format) ──────────────────────────────────────
+# ── Model-ready wide DataFrame (output of 02_preprocessing.py) ───────────────
 @pytest.fixture(scope="session")
-def model_ready_csv(tmp_path_factory):
-    tmp = tmp_path_factory.mktemp("preprocessing")
-    rows = []
+def model_ready_df():
+    """
+    Synthetic model-ready DataFrame with RENAMED columns (spaces→_)
+    and all engineered features. Mirrors 02_preprocessing.py output.
+    """
     np.random.seed(42)
+    rows = []
     for country in COUNTRIES:
-        base = {
-            "Tunisia": 12,
-            "Austria": 60,
-            "Germany": 500,
-            "Egypt": 80,
-            "Canada": 550,
-            "France": 460,
-            "Kuwait": 50,
-        }[country]
+        base = {"Tunisia": 12, "Austria": 60, "Germany": 500,
+                "Egypt": 80, "Canada": 550, "France": 460, "Kuwait": 50}[country]
         for year in YEARS:
-            row = {"Area": country, "Year": year}
-            for subcat in SUBCATS:
-                val = base * (1 + 0.02 * (year - 2000)) + np.random.normal(0, 0.3)
-                row[subcat] = round(val, 3)
-            # Add lag features
-            for subcat in SUBCATS:
-                for lag in [1, 2, 3]:
-                    row[f"{subcat}_lag{lag}"] = row[subcat] * (1 - 0.01 * lag)
-                for w in [3, 5]:
-                    row[f"{subcat}_ma{w}"] = row[subcat] * 0.99
-                row[f"{subcat}_yoy"] = 2.0 + np.random.normal(0, 0.5)
-            rows.append(row)
-    df = pd.DataFrame(rows)
-    path = str(tmp / "ember_model_ready.csv")
-    df.to_csv(path, index=False)
-    return path, tmp
+            demand = base * (1 + 0.02 * (year - 2000)) + np.random.normal(0, 0.5)
+            rows.append({
+                "Area":             country,
+                "Year":             year,
+                "Demand":           round(demand, 3),
+                "CO2_intensity":    round(0.4 + np.random.normal(0, 0.01), 4),
+                "Fuel":             round(demand * 0.3 + np.random.normal(0, 0.1), 3),
+                "Electricity_imports": round(demand * 0.05 + np.random.normal(0, 0.05), 3),
+                "Demand_lag1":      round(demand * 0.98, 3),
+                "Demand_lag2":      round(demand * 0.96, 3),
+                "Demand_lag3":      round(demand * 0.94, 3),
+                "CO2_intensity_lag1": round(0.4 + np.random.normal(0, 0.01), 4),
+                "Demand_ma3":       round(demand * 0.99, 3),
+                "Demand_ma5":       round(demand * 0.97, 3),
+                "Demand_yoy":       round(np.random.normal(2, 0.5), 3),
+                "trend":            year - 2000,
+                "trend_sq":         (year - 2000) ** 2,
+                "country_code":     COUNTRIES.index(country),
+            })
+    return pd.DataFrame(rows).dropna().reset_index(drop=True)
 
 
-# ── feature_meta.json ────────────────────────────────────────────────────────
+# ── Feature meta fixture ──────────────────────────────────────────────────────
 @pytest.fixture(scope="session")
-def feature_meta(model_ready_csv):
-    path, tmp = model_ready_csv
-    df = pd.read_csv(path)
-    target_lags = [f"{TARGET}_lag{i}" for i in [1, 2, 3]]
-    excl = ["Area", "Year", TARGET] + target_lags
-    feats = [c for c in df.columns if c not in excl]
+def feature_meta(model_ready_df, tmp_path_factory):
+    """
+    Write feature_meta.json matching new 02_preprocessing.py output
+    (both lowercase and uppercase keys, raw_features present).
+    """
+    tmp  = tmp_path_factory.mktemp("pre")
+    path = str(tmp / "feature_meta.json")
+
+    feature_cols = [
+        c for c in model_ready_df.columns
+        if c not in ["Area", "Year", "Demand",
+                     "Demand_lag1", "Demand_lag2", "Demand_lag3",
+                     "Demand_ma3", "Demand_ma5"]
+    ]
+    all_subs     = ["Demand", "CO2_intensity", "Fuel", "Electricity_imports"]
+    raw_features = ["CO2_intensity", "Fuel", "Electricity_imports"]
+
     meta = {
-        "TARGET": TARGET,
-        "ALL_SUBS": SUBCATS,
-        "FEATURES": [s for s in SUBCATS if s != TARGET],
-        "all_features": feats,
-        "COUNTRIES": COUNTRIES,
-        "TRAIN_END": TRAIN_END,
-        "VAL_END": VAL_END,
-        "TEST_END": TEST_END,
+        # Lowercase keys (notebook-compatible)
+        "target":        "Demand",
+        "all_subs":      all_subs,
+        "raw_features":  raw_features,
+        "all_features":  feature_cols,
+        "top_corr_20":   feature_cols[:20],
+        # Uppercase keys (script-compatible)
+        "TARGET":        "Demand",
+        "ALL_SUBS":      all_subs,
+        "FEATURES":      raw_features,
+        "COUNTRIES":     COUNTRIES,
+        "TRAIN_END":     TRAIN_END,
+        "VAL_END":       VAL_END,
+        "TEST_END":      TEST_END,
         "FORECAST_YEARS": list(range(2025, 2031)),
+        "DROP_COLS":     ["Total", "Aggregate_fuel"],
     }
-    meta_path = str(tmp / "feature_meta.json")
-    with open(meta_path, "w") as f:
+
+    with open(path, "w") as f:
         json.dump(meta, f, indent=2)
-    return meta, meta_path, str(tmp)
+
+    return meta, path, str(tmp)
 
 
-# ── Minimal demand series (single country, sorted) ────────────────────────────
-@pytest.fixture
-def demand_series_tunisia():
-    np.random.seed(0)
-    years = list(range(2000, 2025))
-    values = [12 + 0.3 * i + np.random.normal(0, 0.2) for i in range(len(years))]
-    return pd.DataFrame({"Year": years, "Demand": values})
+# ── Demand series for a single country ───────────────────────────────────────
+@pytest.fixture(scope="session")
+def demand_series_tunisia(model_ready_df):
+    return (
+        model_ready_df[model_ready_df["Area"] == "Tunisia"]
+        [["Year", "Demand"]]
+        .sort_values("Year")
+        .reset_index(drop=True)
+    )
 
 
-# ── Temp directory ────────────────────────────────────────────────────────────
+# ── Temp dir ──────────────────────────────────────────────────────────────────
 @pytest.fixture
 def tmp_dir(tmp_path):
     return str(tmp_path)

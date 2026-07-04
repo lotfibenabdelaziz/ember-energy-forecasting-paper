@@ -1,273 +1,496 @@
 """
-mlflow_config.py — MLflow Experiment Tracking
+mlflow_config.py — MLflow Experiment Tracking + Model Registry
+================================================================
 Ember Energy Forecasting | IEEE Paper
 
-Experiment : ember-demand-forecasting
-Run naming : {Country}_{Model}
-Splits     : Train 2000-2016 | Val 2017-2020 | Test 2021-2024 | Forecast 2025-2030
+Responsibilities:
+  - setup_experiment()          : create/get MLflow experiment
+  - log_classical_run()         : log one classical model run
+  - log_dl_model_metrics()      : log all DL benchmarking results
+  - log_params_from_yaml()      : log params.yaml to active run
+  - register_best_model()       : register best model per country to Registry
+  - promote_model()             : Staging → Production transition
+  - get_production_model()      : load Production model for inference
+  - list_registered_models()    : show registry status
+  - compare_and_promote()       : auto-promote if new model beats Production MAPE
 
-Usage:
-    from mlflow_config import init_mlflow, log_model_metrics
-    from mlflow_config import log_dl_model_metrics, log_forecast_artifact, log_figure
+Cross-platform fix:
+  - Windows file:// URI uses Path.as_uri() not f"file://{path}"
 """
 
-import math
+from __future__ import annotations
+
+import logging
 import os
-import tempfile
-from typing import Any
+import platform
+from pathlib import Path
 
-import mlflow
-import mlflow.sklearn
+import pandas as pd
+import yaml
 
-# ── Tracking config ───────────────────────────────────────────────────────────
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+log = logging.getLogger(__name__)
+
+# ── MLflow import (graceful degradation) ─────────────────────────────────────
+try:
+    import mlflow
+    import mlflow.sklearn
+    import mlflow.pytorch
+    from mlflow.tracking import MlflowClient
+    from mlflow.exceptions import MlflowException
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+    log.warning("MLflow not installed — tracking disabled")
+
 EXPERIMENT_NAME = "ember-demand-forecasting"
-ARTIFACT_LOCATION = os.getenv("MLFLOW_ARTIFACT_ROOT", "./mlruns/artifacts")
+REGISTRY_NAME   = "ember-demand-model"   # base name; suffixed with country
 
-# ── Data splits (canonical — must match conftest.py + params.yaml) ────────────
-TRAIN_END = 2016  # last training year  (2000–2016, 17 years)
-VAL_END = 2020  # last validation year(2017–2020,  4 years)
-TEST_END = 2024  # last test year      (2021–2024,  4 years)
-FORECAST_START = 2025  # first forecast year
-FORECAST_END = 2030  # last forecast year  (2025–2030,  6 years)
-
-# ── Countries ─────────────────────────────────────────────────────────────────
-COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
-
-# ── Project tags — applied to every run ───────────────────────────────────────
-BASE_TAGS: dict[str, str] = {
-    "project": "ember-energy-forecasting",
-    "paper": "IEEE",
-    "dataset": "Ember Annual Energy",
-    "subcategory": "Demand",
-    "unit": "TWh",
-    "countries": ",".join(COUNTRIES),
-    "train_years": f"2000-{TRAIN_END}",
-    "val_years": f"{TRAIN_END + 1}-{VAL_END}",
-    "test_years": f"{VAL_END + 1}-{TEST_END}",
-    "forecast_horizon": f"{FORECAST_START}-{FORECAST_END}",
-    "train_end": str(TRAIN_END),
-    "val_end": str(VAL_END),
-    "test_end": str(TEST_END),
-}
+# ── Timeout — fail fast when server unreachable ───────────────────────────────
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "5")
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
 
 
-# ── Init ──────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# Tracking URI
+# ═══════════════════════════════════════════════════════════════════════════════
 
-
-def init_mlflow() -> mlflow.MlflowClient:
+def _local_uri(path: Path | None = None) -> str:
     """
-    Set tracking URI and create experiment if it doesn't exist yet.
-    Returns an MlflowClient for programmatic access.
+    Cross-platform local file URI.
+    Windows requires file:///C:/... (triple slash).
+    Path.as_uri() handles this correctly on all platforms.
     """
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    exp = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
-    if exp is None:
-        mlflow.create_experiment(
-            EXPERIMENT_NAME,
-            artifact_location=ARTIFACT_LOCATION,
-            tags={
-                "description": (
-                    "Per-country electricity demand forecasting "
-                    "using the Ember annual energy dataset."
-                ),
-                "splits": (
-                    f"Train 2000-{TRAIN_END} | "
-                    f"Val {TRAIN_END+1}-{VAL_END} | "
-                    f"Test {VAL_END+1}-{TEST_END} | "
-                    f"Forecast {FORECAST_START}-{FORECAST_END}"
-                ),
-            },
+    p = path or Path("./mlruns").resolve()
+    return p.as_uri()
+
+
+def get_tracking_uri() -> str:
+    """Return MLFLOW_TRACKING_URI from env or fall back to local ./mlruns."""
+    return os.getenv("MLFLOW_TRACKING_URI", _local_uri())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Experiment setup
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def setup_experiment(name: str = EXPERIMENT_NAME) -> str | None:
+    """
+    Create or get an MLflow experiment.
+
+    Returns experiment_id or None if MLflow unavailable/server unreachable.
+    """
+    if not MLFLOW_AVAILABLE:
+        return None
+    try:
+        mlflow.set_tracking_uri(get_tracking_uri())
+        mlflow.set_experiment(name)
+        exp = mlflow.get_experiment_by_name(name)
+        exp_id = exp.experiment_id if exp else None
+        log.info("MLflow experiment: '%s' (id=%s)", name, exp_id)
+        return exp_id
+    except Exception as e:
+        log.warning("MLflow setup failed: %s", e)
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Classical model logging
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def log_classical_run(
+    country:         str,
+    model_name:      str,
+    params:          dict,
+    metrics:         dict,
+    experiment_name: str = EXPERIMENT_NAME,
+    tags:            dict | None = None,
+) -> str | None:
+    """
+    Log one classical model walk-forward result to MLflow.
+
+    Returns run_id or None on failure.
+    """
+    if not MLFLOW_AVAILABLE:
+        return None
+    try:
+        mlflow.set_tracking_uri(get_tracking_uri())
+        mlflow.set_experiment(experiment_name)
+        run_name = f"{country}_{model_name}_classical"
+        with mlflow.start_run(run_name=run_name) as run:
+            mlflow.set_tag("country",    country)
+            mlflow.set_tag("model_type", "classical")
+            mlflow.set_tag("model_name", model_name)
+            if tags:
+                for k, v in tags.items():
+                    mlflow.set_tag(k, str(v))
+            mlflow.log_params({k: str(v) for k, v in params.items()})
+            mlflow.log_metrics({k: round(float(v), 4)
+                                 for k, v in metrics.items()
+                                 if v is not None and v == v})  # skip NaN
+            return run.info.run_id
+    except Exception as e:
+        log.warning("MLflow classical logging failed (%s %s): %s", country, model_name, e)
+        return None
+
+
+def log_all_classical_to_mlflow(
+    test_metrics:    pd.DataFrame,
+    best_hp:         dict,
+    experiment_name: str = EXPERIMENT_NAME,
+) -> None:
+    """Log all classical benchmarking results — one run per (country, model)."""
+    if not MLFLOW_AVAILABLE:
+        return
+    for _, row in test_metrics.iterrows():
+        model_name = row["Model"]
+        params     = best_hp.get(model_name, {})
+        metrics    = {k: row[k] for k in ["MAE", "RMSE", "MAPE"]
+                      if k in row and row[k] == row[k]}
+        log_classical_run(
+            country    = row["Country"],
+            model_name = model_name,
+            params     = params,
+            metrics    = metrics,
+            experiment_name = experiment_name,
         )
-    mlflow.set_experiment(EXPERIMENT_NAME)
-    return mlflow.MlflowClient(tracking_uri=MLFLOW_TRACKING_URI)
 
 
-# ── Param flattening ──────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# Deep learning metrics logging
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def log_dl_model_metrics(
+    metrics_df:      pd.DataFrame,
+    params:          dict,
+    experiment_name: str = EXPERIMENT_NAME,
+) -> None:
+    """Log all DL benchmarking results — one run per (country, model)."""
+    if not MLFLOW_AVAILABLE or metrics_df.empty:
+        return
+    try:
+        mlflow.set_tracking_uri(get_tracking_uri())
+        mlflow.set_experiment(experiment_name)
+        for _, row in metrics_df.iterrows():
+            run_name = f"{row['Country']}_{row['Model']}_DL"
+            with mlflow.start_run(run_name=run_name):
+                mlflow.set_tag("country",    row["Country"])
+                mlflow.set_tag("model_type", "deep_learning")
+                mlflow.set_tag("model_name", row["Model"])
+                mlflow.log_params({k: str(v) for k, v in params.items()})
+                for metric in ["MAE", "RMSE", "MAPE", "SMAPE"]:
+                    if metric in row and row[metric] == row[metric]:
+                        mlflow.log_metric(metric, round(float(row[metric]), 4))
+    except Exception as e:
+        log.warning("MLflow DL logging failed: %s", e)
 
 
-def _flatten_params(params: dict[str, Any]) -> dict[str, Any]:
+# ═══════════════════════════════════════════════════════════════════════════════
+# params.yaml logging
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def log_params_from_yaml(
+    yaml_path: str = "params.yaml",
+    prefix:    str = "",
+) -> None:
+    """Log all params from params.yaml to the active MLflow run."""
+    if not MLFLOW_AVAILABLE:
+        return
+    if not Path(yaml_path).exists():
+        log.warning("params.yaml not found: %s", yaml_path)
+        return
+    try:
+        with open(yaml_path) as f:
+            params = yaml.safe_load(f) or {}
+
+        flat: dict[str, str] = {}
+        def _flatten(d: dict, parent: str = "") -> None:
+            for k, v in d.items():
+                key = f"{parent}.{k}" if parent else k
+                if isinstance(v, dict):
+                    _flatten(v, key)
+                else:
+                    flat[key] = str(v)
+
+        _flatten(params)
+        if prefix:
+            flat = {f"{prefix}.{k}": v for k, v in flat.items()}
+
+        mlflow.log_params(flat)
+        log.info("Logged %d params from %s", len(flat), yaml_path)
+    except Exception as e:
+        log.warning("Failed to log params from YAML: %s", e)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MODEL REGISTRY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _registry_name(country: str, model_type: str = "classical") -> str:
     """
-    Flatten nested dicts / lists so MLflow can log them.
-    MLflow only accepts scalar param values.
+    Naming convention for registry:
+        ember-demand-model-Tunisia-classical
+        ember-demand-model-Tunisia-dl
     """
-    flat: dict[str, Any] = {}
-    for k, v in params.items():
-        if isinstance(v, (list, tuple)):
-            flat[k] = str(v)
-        elif isinstance(v, dict):
-            for kk, vv in v.items():
-                flat[f"{k}_{kk}"] = str(vv)
-        else:
-            flat[k] = v
-    return flat
+    return f"{REGISTRY_NAME}-{country}-{model_type}"
 
 
-# ── Metric filtering ──────────────────────────────────────────────────────────
-
-
-def _filter_metrics(metrics: dict[str, Any]) -> dict[str, float]:
-    """Drop NaN / Inf values — MLflow rejects them."""
-    good: dict[str, float] = {}
-    for k, v in metrics.items():
-        try:
-            fv = float(v)
-            if not math.isnan(fv) and not math.isinf(fv):
-                good[k] = fv
-        except (TypeError, ValueError):
-            pass
-    return good
-
-
-# ── Core logging function ─────────────────────────────────────────────────────
-
-
-def log_model_metrics(
-    country: str,
-    model_name: str,
-    phase: str,  # "benchmark" | "forecast" | "deeplearning"
-    metrics: dict[str, Any],
-    params: dict[str, Any] | None = None,
-    tags: dict[str, str] | None = None,
-) -> str:
+def register_best_model(
+    run_id:      str,
+    country:     str,
+    model_name:  str,
+    model_type:  str = "classical",
+    artifact_path: str = "model",
+) -> str | None:
     """
-    Log one walk-forward result as a named MLflow run.
+    Register a trained model in the MLflow Model Registry.
+
+    Stages: None → Staging → Production
 
     Parameters
     ----------
-    country    : e.g. "Tunisia"
-    model_name : e.g. "Ridge", "RandomForest", "XGBoost", "MLP", "TCN"
-    phase      : "benchmark" | "forecast" | "deeplearning"
-    metrics    : {metric_name: float} — NaN/Inf values are silently dropped
-    params     : best hyperparameter dict — nested dicts/lists are flattened
-    tags       : additional run tags
+    run_id        : MLflow run ID containing the logged model artifact
+    country       : e.g. "Tunisia"
+    model_name    : e.g. "Ridge" or "TCN"
+    model_type    : "classical" or "dl"
+    artifact_path : artifact subdirectory name in the run
 
     Returns
     -------
-    run_id : str
+    model_version string or None on failure
     """
-    run_name = f"{country}_{model_name}"
+    if not MLFLOW_AVAILABLE:
+        return None
+    try:
+        mlflow.set_tracking_uri(get_tracking_uri())
+        client   = MlflowClient()
+        reg_name = _registry_name(country, model_type)
 
-    with mlflow.start_run(run_name=run_name) as run:
-        # ── Tags ──────────────────────────────────────────────────────────────
-        all_tags: dict[str, str] = {
-            **BASE_TAGS,
-            "country": country,
-            "model": model_name,
-            "phase": phase,
-        }
-        if tags:
-            all_tags.update(tags)
-        mlflow.set_tags(all_tags)
+        # Create registered model if it doesn't exist
+        try:
+            client.create_registered_model(
+                name        = reg_name,
+                description = (
+                    f"Electricity demand forecast model for {country}. "
+                    f"Type: {model_type}, Algorithm: {model_name}."
+                ),
+                tags = {
+                    "country":    country,
+                    "model_name": model_name,
+                    "model_type": model_type,
+                },
+            )
+            log.info("Created registered model: %s", reg_name)
+        except MlflowException:
+            log.info("Registered model already exists: %s", reg_name)
 
-        # ── Params ────────────────────────────────────────────────────────────
-        if params:
-            mlflow.log_params(_flatten_params(params))
+        # Register new version
+        model_uri = f"runs:/{run_id}/{artifact_path}"
+        mv = client.create_model_version(
+            name        = reg_name,
+            source      = model_uri,
+            run_id      = run_id,
+            description = f"{model_name} trained for {country} — {model_type}",
+            tags        = {"algorithm": model_name, "country": country},
+        )
+        log.info("Registered: %s v%s (run_id=%s)", reg_name, mv.version, run_id)
+        return mv.version
 
-        # ── Metrics ───────────────────────────────────────────────────────────
-        clean = _filter_metrics(metrics)
-        for k, v in clean.items():
-            mlflow.log_metric(k, v)
-
-        return run.info.run_id
+    except Exception as e:
+        log.warning("Model registration failed (%s %s): %s", country, model_name, e)
+        return None
 
 
-# ── Deep learning variant ─────────────────────────────────────────────────────
-
-
-def log_dl_model_metrics(
-    country: str,
-    model_name: str,  # "MLP" | "TCN" | "N-BEATS" | "TFT"
-    metrics: dict[str, Any],
-    params: dict[str, Any] | None = None,
-    seq_len: int = 5,
-    epochs: int | None = None,
-) -> str:
+def promote_model(
+    country:     str,
+    version:     str,
+    stage:       str = "Staging",
+    model_type:  str = "classical",
+    archive_existing: bool = True,
+) -> bool:
     """
-    Log deep learning walk-forward metrics as a named MLflow run.
-    Adds PyTorch-specific tags (framework, seq_len, epochs).
+    Promote a model version to a new stage.
 
-    Returns
-    -------
-    run_id : str
+    stage options: "Staging" | "Production" | "Archived"
+
+    If archive_existing=True, all existing versions in the target stage
+    are archived before promotion.
     """
-    dl_tags: dict[str, str] = {
-        "framework": "pytorch",
-        "seq_len": str(seq_len),
-    }
-    if epochs is not None:
-        dl_tags["epochs"] = str(epochs)
+    if not MLFLOW_AVAILABLE:
+        return False
+    try:
+        mlflow.set_tracking_uri(get_tracking_uri())
+        client   = MlflowClient()
+        reg_name = _registry_name(country, model_type)
 
-    return log_model_metrics(
-        country=country,
-        model_name=model_name,
-        phase="deeplearning",
-        metrics=metrics,
-        params=params,
-        tags=dl_tags,
-    )
+        if archive_existing:
+            existing = client.get_latest_versions(reg_name, stages=[stage])
+            for mv in existing:
+                client.transition_model_version_stage(
+                    name    = reg_name,
+                    version = mv.version,
+                    stage   = "Archived",
+                )
+                log.info("Archived: %s v%s", reg_name, mv.version)
+
+        client.transition_model_version_stage(
+            name    = reg_name,
+            version = version,
+            stage   = stage,
+        )
+        log.info("Promoted: %s v%s → %s", reg_name, version, stage)
+        return True
+
+    except Exception as e:
+        log.warning("Promotion failed (%s v%s → %s): %s", country, version, stage, e)
+        return False
 
 
-# ── Artifact helpers ──────────────────────────────────────────────────────────
-
-
-def log_forecast_artifact(
-    country: str,
-    fc_df: Any,  # pd.DataFrame
-    model_name: str,
-) -> None:
+def compare_and_promote(
+    country:      str,
+    new_run_id:   str,
+    new_mape:     float,
+    new_version:  str,
+    model_type:   str = "classical",
+    threshold:    float = 0.0,
+) -> bool:
     """
-    Attach a forecast DataFrame as a CSV artifact in the active MLflow run.
-    Must be called inside an active run context.
+    Auto-promote to Production if new model beats current Production MAPE.
+
+    threshold: minimum improvement required (default 0 = any improvement)
+
+    Flow:
+      1. Get current Production model MAPE from registry tags
+      2. If new MAPE < current MAPE - threshold → promote to Production
+      3. Otherwise → keep in Staging
+
+    Returns True if promoted to Production.
     """
-    with tempfile.TemporaryDirectory() as tmp:
-        fname = f"forecast_{country.lower()}_{model_name.lower()}.csv"
-        path = os.path.join(tmp, fname)
-        fc_df.to_csv(path, index=False)
-        mlflow.log_artifact(path, artifact_path="forecasts")
+    if not MLFLOW_AVAILABLE:
+        return False
+    try:
+        mlflow.set_tracking_uri(get_tracking_uri())
+        client   = MlflowClient()
+        reg_name = _registry_name(country, model_type)
+
+        prod_versions = client.get_latest_versions(reg_name, stages=["Production"])
+
+        if not prod_versions:
+            # No production model yet — promote directly
+            log.info("No Production model found for %s — promoting directly.", country)
+            promote_model(country, new_version, "Production", model_type)
+            return True
+
+        prod_mv   = prod_versions[0]
+        prod_run  = client.get_run(prod_mv.run_id)
+        prod_mape = prod_run.data.metrics.get("MAPE", float("inf"))
+
+        log.info(
+            "%s: new MAPE=%.2f%% vs Production MAPE=%.2f%%",
+            country, new_mape, prod_mape,
+        )
+
+        if new_mape < prod_mape - threshold:
+            log.info("New model wins — promoting to Production.")
+            promote_model(country, new_version, "Production", model_type)
+            return True
+        else:
+            log.info("Production model retained (no improvement).")
+            promote_model(country, new_version, "Staging", model_type)
+            return False
+
+    except Exception as e:
+        log.warning("compare_and_promote failed (%s): %s", country, e)
+        return False
 
 
-def log_metrics_artifact(
-    label: str,
-    df: Any,  # pd.DataFrame
-) -> None:
+def get_production_model(
+    country:    str,
+    model_type: str = "classical",
+):
     """
-    Attach a metrics DataFrame as a CSV artifact in the active MLflow run.
+    Load the Production model from the Registry for inference.
+
+    Returns fitted sklearn/pytorch model or None if not found.
     """
-    with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, f"{label}.csv")
-        df.to_csv(path, index=False)
-        mlflow.log_artifact(path, artifact_path="metrics")
+    if not MLFLOW_AVAILABLE:
+        return None
+    try:
+        mlflow.set_tracking_uri(get_tracking_uri())
+        reg_name  = _registry_name(country, model_type)
+        model_uri = f"models:/{reg_name}/Production"
+
+        if model_type == "dl":
+            model = mlflow.pytorch.load_model(model_uri)
+        else:
+            model = mlflow.sklearn.load_model(model_uri)
+
+        log.info("Loaded Production model: %s", reg_name)
+        return model
+
+    except Exception as e:
+        log.warning("Failed to load Production model (%s %s): %s", country, model_type, e)
+        return None
 
 
-def log_figure(
-    fig_path: str,
-    artifact_subdir: str = "figures",
-) -> None:
+def list_registered_models(model_type: str | None = None) -> pd.DataFrame:
     """
-    Log a saved figure (PDF / PNG / SVG) as an MLflow artifact.
-    Silently skips if the file doesn't exist.
+    List all registered models and their latest versions per stage.
+
+    Returns DataFrame with columns:
+        [name, country, model_type, version, stage, mape, run_id]
     """
-    if os.path.exists(fig_path):
-        mlflow.log_artifact(fig_path, artifact_path=artifact_subdir)
-    else:
-        import logging
+    if not MLFLOW_AVAILABLE:
+        return pd.DataFrame()
+    try:
+        mlflow.set_tracking_uri(get_tracking_uri())
+        client = MlflowClient()
+        rows   = []
 
-        logging.getLogger(__name__).warning("Figure not found, skipping MLflow log: %s", fig_path)
+        for rm in client.search_registered_models():
+            if model_type and model_type not in rm.name:
+                continue
+            for mv in client.get_latest_versions(rm.name):
+                try:
+                    run    = client.get_run(mv.run_id)
+                    mape   = run.data.metrics.get("MAPE", None)
+                    ctry   = run.data.tags.get("country", "unknown")
+                    mtype  = run.data.tags.get("model_type", "unknown")
+                    mname  = run.data.tags.get("model_name", "unknown")
+                except Exception:
+                    mape  = None
+                    ctry  = rm.tags.get("country", "unknown")
+                    mtype = rm.tags.get("model_type", "unknown")
+                    mname = mv.tags.get("algorithm", "unknown")
+
+                rows.append({
+                    "registered_name": rm.name,
+                    "country":         ctry,
+                    "model_type":      mtype,
+                    "algorithm":       mname,
+                    "version":         mv.version,
+                    "stage":           mv.current_stage,
+                    "MAPE":            round(mape, 3) if mape else None,
+                    "run_id":          mv.run_id[:8],
+                })
+
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            df = df.sort_values(["country", "stage"])
+        return df
+
+    except Exception as e:
+        log.warning("list_registered_models failed: %s", e)
+        return pd.DataFrame()
 
 
-def log_params_from_yaml(param_keys: list[str]) -> None:
-    """
-    Log specific top-level keys from params.yaml into the active MLflow run.
-    Useful for reproducibility tracking.
-    """
-    import yaml
-
-    params_path = "dvc_params.yaml"
-    if not os.path.exists(params_path):
+def registry_summary() -> None:
+    """Print a human-readable registry status table to the log."""
+    df = list_registered_models()
+    if df.empty:
+        log.info("No registered models found.")
         return
-    with open(params_path) as f:
-        all_params = yaml.safe_load(f) or {}
-    selected = {k: all_params.get(k) for k in param_keys if k in all_params}
-    if selected:
-        mlflow.log_params(_flatten_params(selected))
+    log.info("═" * 70)
+    log.info("  MODEL REGISTRY STATUS")
+    log.info("═" * 70)
+    log.info(df.to_string(index=False))
+    log.info("═" * 70)

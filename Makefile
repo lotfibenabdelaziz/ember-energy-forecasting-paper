@@ -23,7 +23,9 @@ else
     IS_WIN       :=
 endif
 
+ifdef IS_WIN
 export PATH := $(PATH)$(SEP)C:/Program Files/Docker/Docker/resources/bin
+endif
 PYTEST_OPTS = -p no:cacheprovider
 # ── Image config ──────────────────────────────────────────────────────────────
 IMAGE_NAME  ?= ember-energy-pipeline
@@ -39,8 +41,12 @@ NAMESPACE      ?= ember-pipeline
 MLFLOW_PORT    ?= 5000
 PORT           ?= 8000
 
-PYTHON ?= python
-PIP    ?= pip
+ifeq ($(OS),Windows_NT)
+    PYTHON ?= python
+else
+    PYTHON ?= python3
+endif
+PIP ?= $(PYTHON) -m pip
 
 # ── Environment helpers ───────────────────────────────────────────────────────
 ifdef IS_WIN
@@ -286,34 +292,29 @@ cache-invalidate-deeplearning:
 # =============================================================================
 # TESTS
 # =============================================================================
+COV_FLAGS = --cov=src --cov=api --cov=pipeline --cov=mlflow_config \
+            --cov-report=term-missing --cov-report=html:htmlcov \
+            --cov-report=xml:coverage.xml --cov-config=.coveragerc
+
 test:
 	@echo "── [test] Running full test suite with coverage…"
-	pytest tests/ $(PYTEST_OPTS) -v --tb=short \
-	    --cov=src --cov=api --cov=pipeline --cov=mlflow_config \
-	    --cov-report=term-missing \
-	    --cov-report=html:htmlcov \
-	    --cov-report=xml:coverage.xml \
-	    --cov-config=.coveragerc
+	pytest tests/ $(PYTEST_OPTS) -v --tb=short $(COV_FLAGS)
 	@echo "✓  Tests complete. HTML report → htmlcov/index.html"
+
+TEST_FAST_IGNORES = --ignore=tests/test_api.py --ignore=tests/test_pipeline.py \
+                     --ignore=tests/test_deeplearning.py --ignore=tests/test_parity.py
 
 test-fast:
 	@echo "── [test-fast] Running fast unit tests (stop on first failure)…"
-	pytest tests/ $(PYTEST_OPTS) -v --tb=short -x -q \
-	    --ignore=tests/test_api.py \
-	    --ignore=tests/test_pipeline.py \
-	    --ignore=tests/test_deeplearning.py \
-	    --ignore=tests/test_parity.py
+	pytest tests/ $(PYTEST_OPTS) -v --tb=short -x -q $(TEST_FAST_IGNORES)
 	@echo "✓  Fast tests complete."
+
+UNIT_TEST_FILES = tests/test_eda.py tests/test_preprocessing.py tests/test_modeling.py \
+                   tests/test_forecasting.py tests/test_mlflow_config.py tests/test_deeplearning.py
 
 test-unit:
 	@echo "── [test-unit] Running unit tests…"
-	pytest tests/test_eda.py \
-	       tests/test_preprocessing.py \
-	       tests/test_modeling.py \
-	       tests/test_forecasting.py \
-	       tests/test_mlflow_config.py \
-	       tests/test_deeplearning.py \
-	    -v --tb=short
+	pytest $(UNIT_TEST_FILES) -v --tb=short
 	@echo "✓  Unit tests complete."
 
 test-dl:
@@ -341,15 +342,13 @@ test-parity-full: run
 	pytest tests/test_parity.py -v --tb=short
 	@echo "✓  Full parity check complete."
 
+COV_FLAGS_NOAPI = --ignore=tests/test_api.py --ignore=tests/test_pipeline.py \
+                   --cov=src --cov=pipeline --cov=mlflow_config \
+                   --cov-report=term-missing --cov-report=html:htmlcov --cov-config=.coveragerc
+
 test-cov:
 	@echo "── [test-cov] Running coverage report (excluding API + pipeline tests)…"
-	pytest tests/ -q \
-	    --ignore=tests/test_api.py \
-	    --ignore=tests/test_pipeline.py \
-	    --cov=src --cov=pipeline --cov=mlflow_config \
-	    --cov-report=term-missing \
-	    --cov-report=html:htmlcov \
-	    --cov-config=.coveragerc
+	pytest tests/ -q $(COV_FLAGS_NOAPI)
 	@echo "✓  Coverage report → htmlcov/index.html"
 
 # =============================================================================
@@ -405,10 +404,28 @@ mlflow-list:
 	@echo "── [mlflow-list] Listing runs in experiment 'ember-demand-forecasting'…"
 	mlflow runs list --experiment-name ember-demand-forecasting
 	@echo "✓  Run list complete."
+mlflow-register:
+	@echo "── [mlflow-register] Registering best models to MLflow Registry…"
+	$(PYTHON) src/register_models.py --model_dir outputs/modeling --pre_dir outputs/preprocessing --dl_dir outputs/deeplearning
+	@echo "✓  Registration complete. View: http://localhost:5000/#/models"
+
+mlflow-registry-status:
+	@echo "── [mlflow-registry-status] Current registry status:"
+	$(PYTHON) -c "from mlflow_config import registry_summary; registry_summary()"
+
+mlflow-register-classic:
+	@echo "── Registering classical models only…"
+	$(PYTHON) src/register_models.py --classic-only
+	@echo "✓  Classical models registered."
+
+mlflow-register-dl:
+	@echo "── Registering DL models only…"
+	$(PYTHON) src/register_models.py --dl-only
+	@echo "✓  DL models registered."
 
 mlflow-clean:
 	@echo "── [mlflow-clean] Deleting local mlruns/ directory…"
-	python -c "import shutil; shutil.rmtree('mlruns', ignore_errors=True)"
+	$(PYTHON) -c "import shutil; shutil.rmtree('mlruns', ignore_errors=True)"
 	@echo "✓  mlruns/ removed."
 
 # =============================================================================
@@ -518,9 +535,7 @@ docker-build:
 	docker build -t $(FULL_IMAGE) -t $(IMAGE_NAME):$(IMAGE_TAG) .
 	@echo "✓  Pipeline image built."
 	@echo "── [docker-build] Building API image: ember-energy-api:$(IMAGE_TAG)…"
-	docker build -f Dockerfile.api \
-	    -t $(REGISTRY)/ember-energy-api:$(IMAGE_TAG) \
-	    -t ember-energy-api:$(IMAGE_TAG) .
+	docker build -f Dockerfile.api -t $(REGISTRY)/ember-energy-api:$(IMAGE_TAG) -t ember-energy-api:$(IMAGE_TAG) .
 	@echo "✓  API image built."
 	@echo "✓  Both images ready."
 
@@ -535,15 +550,7 @@ docker-push: docker-build
 
 docker-run: $(CSV_PATH)
 	@echo "── [docker-run] Running pipeline inside Docker container…"
-	docker run --rm \
-	    -e MLFLOW_TRACKING_URI=http://host.docker.internal:$(MLFLOW_PORT) \
-	    -v $(PWD)/data:/app/data:ro \
-	    -v $(PWD)/outputs:/app/outputs \
-	    -v $(PWD)/mlruns:/app/mlruns \
-	    $(IMAGE_NAME):$(IMAGE_TAG) \
-	    --csv /app/$(CSV_PATH) \
-	    --train_until $(TRAIN_UNTIL) \
-	    --forecast_until $(FORECAST_UNTIL)
+	docker run --rm -e MLFLOW_TRACKING_URI=http://host.docker.internal:$(MLFLOW_PORT) -v $(PWD)/data:/app/data:ro -v $(PWD)/outputs:/app/outputs -v $(PWD)/mlruns:/app/mlruns $(IMAGE_NAME):$(IMAGE_TAG) --csv /app/$(CSV_PATH) --train_until $(TRAIN_UNTIL) --forecast_until $(FORECAST_UNTIL)
 	@echo "✓  Pipeline container finished."
 
 # =============================================================================

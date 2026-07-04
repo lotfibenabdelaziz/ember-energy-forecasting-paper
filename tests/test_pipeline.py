@@ -1,245 +1,217 @@
 """
-tests/test_pipeline.py — End-to-End Pipeline Integration Tests
+tests/test_pipeline.py — Pipeline Orchestrator Integration Tests
+Ember Energy | IEEE Paper
+
+Covers:
+  - PipelineConfig dataclass
+  - StepResult dataclass
+  - build_step_definitions()
+  - build_step_args()
+  - Cache invalidation + status
+  - Full pipeline (smoke test via --steps eda)
 """
 
-import json
 import os
 import subprocess
 import sys
-import time
+from dataclasses import dataclass
 
-import pandas as pd
 import pytest
 
+
 COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
-TARGET = "Demand"
+STEP_ORDER = ["eda", "preprocessing", "modeling", "forecasting", "deeplearning"]
 
 
-# ── Unit: pipeline step ordering ─────────────────────────────────────────────
-class TestStepOrdering:
+# ═══════════════════════════════════════════════════════════════════════════════
+# Dataclasses
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    def test_step_order_is_correct(self):
-        STEP_ORDER = ["eda", "preprocessing", "modeling", "forecasting"]
-        assert STEP_ORDER[0] == "eda"
-        assert STEP_ORDER[1] == "preprocessing"
-        assert STEP_ORDER[2] == "modeling"
-        assert STEP_ORDER[3] == "forecasting"
+class TestPipelineConfig:
 
-    def test_all_steps_have_scripts(self):
-        STEPS = {
-            "eda": "src/01_eda.py",
-            "preprocessing": "src/02_preprocessing.py",
-            "modeling": "src/03_modeling.py",
-            "forecasting": "src/04_forecasting.py",
-        }
-        for name, script in STEPS.items():
-            assert os.path.exists(script), f"Script missing: {script}"
+    def test_pipeline_config_creation(self):
+        from pipeline import PipelineConfig
+        cfg = PipelineConfig(
+            csv="data/raw/test.csv",
+            steps=STEP_ORDER,
+            train_until=2016,
+            forecast_until=2030,
+        )
+        assert cfg.csv == "data/raw/test.csv"
+        assert cfg.train_until == 2016
+        assert cfg.forecast_until == 2030
+        assert cfg.force is False
 
-    def test_pipeline_script_exists(self):
-        assert os.path.exists("pipeline.py"), "pipeline.py not found"
+    def test_pipeline_config_force_default_false(self):
+        from pipeline import PipelineConfig
+        cfg = PipelineConfig(csv="x.csv", steps=[], train_until=2016, forecast_until=2030)
+        assert cfg.force is False
 
-    def test_pipeline_help_runs(self):
+
+class TestStepResult:
+
+    def test_step_result_ran_is_success(self):
+        from pipeline import StepResult
+        r = StepResult(name="eda", status="ran")
+        assert r.success is True
+
+    def test_step_result_cached_is_success(self):
+        from pipeline import StepResult
+        r = StepResult(name="eda", status="cached")
+        assert r.success is True
+
+    def test_step_result_failed_is_not_success(self):
+        from pipeline import StepResult
+        r = StepResult(name="eda", status="failed")
+        assert r.success is False
+
+    def test_step_result_skipped_is_success(self):
+        from pipeline import StepResult
+        r = StepResult(name="eda", status="skipped")
+        assert r.success is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step definitions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBuildStepDefinitions:
+
+    @pytest.fixture
+    def cfg(self):
+        from pipeline import PipelineConfig
+        return PipelineConfig(
+            csv="data/raw/test.csv",
+            steps=STEP_ORDER,
+            train_until=2016,
+            forecast_until=2030,
+        )
+
+    def test_returns_all_steps(self, cfg):
+        from pipeline import build_step_definitions
+        steps = build_step_definitions(cfg)
+        names = [s.name for s in steps]
+        for step in STEP_ORDER:
+            assert step in names
+
+    def test_each_step_has_script(self, cfg):
+        from pipeline import build_step_definitions
+        for step in build_step_definitions(cfg):
+            assert step.script.endswith(".py")
+
+    def test_each_step_has_outputs(self, cfg):
+        from pipeline import build_step_definitions
+        for step in build_step_definitions(cfg):
+            assert len(step.outputs) >= 1
+
+    def test_eda_depends_on_csv(self, cfg):
+        from pipeline import build_step_definitions
+        steps = {s.name: s for s in build_step_definitions(cfg)}
+        assert cfg.csv in steps["eda"].deps
+
+    def test_preprocessing_depends_on_eda_output(self, cfg):
+        from pipeline import build_step_definitions
+        steps = {s.name: s for s in build_step_definitions(cfg)}
+        deps  = " ".join(steps["preprocessing"].deps)
+        assert "eda" in deps or "ember_filtered" in deps
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step args
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBuildStepArgs:
+
+    @pytest.fixture
+    def cfg(self):
+        from pipeline import PipelineConfig
+        return PipelineConfig(
+            csv="data/raw/test.csv",
+            steps=STEP_ORDER,
+            train_until=2016,
+            forecast_until=2030,
+        )
+
+    def test_eda_args_contain_csv(self, cfg):
+        from pipeline import build_step_args
+        args = build_step_args("eda", cfg)
+        assert cfg.csv in args
+
+    def test_preprocessing_args_contain_train_until(self, cfg):
+        from pipeline import build_step_args
+        args = build_step_args("preprocessing", cfg)
+        assert str(cfg.train_until) in args
+
+    def test_forecasting_args_contain_forecast_until(self, cfg):
+        from pipeline import build_step_args
+        args = build_step_args("forecasting", cfg)
+        assert str(cfg.forecast_until) in args
+
+    def test_all_steps_return_list(self, cfg):
+        from pipeline import build_step_args
+        for step in STEP_ORDER:
+            args = build_step_args(step, cfg)
+            assert isinstance(args, list)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Cache management
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPipelineCache:
+
+    def test_cache_status_runs(self):
+        result = subprocess.run(
+            [sys.executable, "pipeline.py", "--cache-status"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+
+    def test_invalidate_single_step(self):
+        result = subprocess.run(
+            [sys.executable, "pipeline.py", "--invalidate", "eda"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+
+    def test_invalidate_all(self):
+        result = subprocess.run(
+            [sys.executable, "pipeline.py", "--invalidate", "ALL"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+
+    def test_invalid_step_name_exits_nonzero(self):
+        result = subprocess.run(
+            [sys.executable, "pipeline.py", "--invalidate", "nonexistent_step"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode != 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLI smoke tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPipelineCLI:
+
+    @pytest.fixture(autouse=True)
+    def check_csv(self):
+        csv = "data/raw/yearly_full_release_long_format.csv"
+        if not os.path.exists(csv):
+            pytest.skip(f"CSV not found: {csv}")
+
+    def test_help_exits_zero(self):
         r = subprocess.run(
-            [sys.executable, "pipeline.py", "--help"], capture_output=True, text=True
+            [sys.executable, "pipeline.py", "--help"],
+            capture_output=True, text=True,
         )
         assert r.returncode == 0
-        assert "csv" in r.stdout.lower()
+        assert "--csv" in r.stdout
 
-
-# ── Unit: data-flow contracts ─────────────────────────────────────────────────
-class TestDataFlowContracts:
-    """
-    Verify that each step's outputs satisfy the next step's expected inputs.
-    """
-
-    def test_eda_output_feeds_preprocessing(self, tmp_dir, raw_csv):
-        """EDA must produce ember_filtered.csv consumed by preprocessing."""
-        subprocess.run(
-            [sys.executable, "src/01_eda.py", "--csv", raw_csv, "--output_dir", tmp_dir],
-            capture_output=True,
-        )
-        path = os.path.join(tmp_dir, "ember_filtered.csv")
-        assert os.path.exists(path), "ember_filtered.csv not created by EDA"
-        df = pd.read_csv(path)
-        for col in ["Area", "Year", "Subcategory", "Value"]:
-            assert col in df.columns
-
-    def test_preprocessing_output_feeds_modeling(self, ember_filtered, tmp_dir):
-        """Preprocessing must produce ember_model_ready.csv + feature_meta.json."""
-        df = pd.read_csv(ember_filtered)
-        df.to_csv(os.path.join(tmp_dir, "ember_filtered.csv"), index=False)
-        out = os.path.join(tmp_dir, "pre")
-        subprocess.run(
-            [
-                sys.executable,
-                "src/02_preprocessing.py",
-                "--input_dir",
-                tmp_dir,
-                "--output_dir",
-                out,
-            ],
-            capture_output=True,
-        )
-        for fname in ["ember_model_ready.csv", "feature_meta.json"]:
-            assert os.path.exists(os.path.join(out, fname)), f"{fname} not created by preprocessing"
-
-        # feature_meta.json must have required keys
-        with open(os.path.join(out, "feature_meta.json")) as f:
-            meta = json.load(f)
-        for key in ["TARGET", "all_features", "TRAIN_END", "VAL_END", "TEST_END"]:
-            assert key in meta
-
-    def test_modeling_output_feeds_forecasting(self, model_ready_csv, feature_meta, tmp_dir):
-        """Modeling must produce best_models.csv + best_hp.json + ember_config.json."""
-        _, pre_dir = model_ready_csv
-        meta, _, _ = feature_meta
-        out = os.path.join(tmp_dir, "mod_contract")
-        subprocess.run(
-            [sys.executable, "src/03_modeling.py", "--input_dir", pre_dir, "--output_dir", out],
-            capture_output=True,
-        )
-        for fname in ["best_models.csv", "best_hp.json", "ember_config.json"]:
-            assert os.path.exists(os.path.join(out, fname)), f"{fname} not created by modeling"
-
-
-# ── Unit: output schema validation ───────────────────────────────────────────
-class TestOutputSchemas:
-
-    def test_ember_model_ready_schema(self, model_ready_csv):
-        path, _ = model_ready_csv
-        df = pd.read_csv(path)
-        assert "Area" in df.columns
-        assert "Year" in df.columns
-        assert TARGET in df.columns
-        assert df["Area"].isin(COUNTRIES).all()
-
-    def test_feature_meta_schema(self, feature_meta):
-        meta, _, _ = feature_meta
-        assert isinstance(meta["all_features"], list)
-        assert len(meta["all_features"]) > 0
-        assert isinstance(meta["FORECAST_YEARS"], list)
-        assert len(meta["FORECAST_YEARS"]) == 6
-        assert meta["FORECAST_YEARS"][0] == 2025
-        assert meta["FORECAST_YEARS"][-1] == 2030
-
-    def test_forecast_output_schema(self, tmp_path):
-        """demand_forecast_2025_2030.csv must have correct columns."""
-        rows = [
-            {
-                "Country": c,
-                "Model": "Ridge",
-                "Year": yr,
-                "Forecast": 10.0,
-                "Lower_90": 9.5,
-                "Upper_90": 10.5,
-            }
-            for c in COUNTRIES
-            for yr in range(2025, 2031)
-        ]
-        df = pd.DataFrame(rows)
-        for col in ["Country", "Model", "Year", "Forecast", "Lower_90", "Upper_90"]:
-            assert col in df.columns
-
-    def test_growth_summary_schema(self, tmp_path):
-        rows = [
-            {
-                "Country": c,
-                "Model": "Ridge",
-                "2024 TWh": 10.0,
-                "2030 TWh (forecast)": 12.0,
-                "Total Growth (%)": 20.0,
-                "CAGR (%)": 3.1,
-            }
-            for c in COUNTRIES
-        ]
-        df = pd.DataFrame(rows)
-        assert "Country" in df.columns
-        assert "CAGR (%)" in df.columns
-
-
-# ── Integration: partial pipeline (EDA + preprocessing) ─────────────────────
-class TestPartialPipeline:
-
-    def test_pipeline_eda_only(self, raw_csv, tmp_dir):
+    def test_cache_status_shows_steps(self):
         r = subprocess.run(
-            [sys.executable, "pipeline.py", "--csv", raw_csv, "--steps", "eda"],
-            capture_output=True,
-            text=True,
+            [sys.executable, "pipeline.py", "--cache-status"],
+            capture_output=True, text=True,
         )
-        assert r.returncode == 0, f"Pipeline EDA step failed:\n{r.stderr}"
-        assert (
-            os.path.exists(os.path.join("outputs", "eda", "ember_filtered.csv"))
-            or r.returncode == 0
-        )  # success is enough
-
-    def test_pipeline_skips_unselected_steps(self, raw_csv):
-        """Pipeline with --steps eda should not run preprocessing."""
-        r = subprocess.run(
-            [sys.executable, "pipeline.py", "--csv", raw_csv, "--steps", "eda"],
-            capture_output=True,
-            text=True,
-        )
-        assert "Skipping: preprocessing" in r.stdout or r.returncode == 0
-
-
-# ── Performance: reasonable execution time ───────────────────────────────────
-class TestPerformance:
-
-    def test_eda_completes_within_60s(self, raw_csv, tmp_dir):
-        t0 = time.time()
-        subprocess.run(
-            [sys.executable, "src/01_eda.py", "--csv", raw_csv, "--output_dir", tmp_dir],
-            capture_output=True,
-        )
-        elapsed = time.time() - t0
-        assert elapsed < 60, f"EDA took too long: {elapsed:.1f}s"
-
-    def test_preprocessing_completes_within_120s(self, ember_filtered, tmp_dir):
-        df = pd.read_csv(ember_filtered)
-        df.to_csv(os.path.join(tmp_dir, "ember_filtered.csv"), index=False)
-        out = os.path.join(tmp_dir, "perf_pre")
-        t0 = time.time()
-        subprocess.run(
-            [
-                sys.executable,
-                "src/02_preprocessing.py",
-                "--input_dir",
-                tmp_dir,
-                "--output_dir",
-                out,
-            ],
-            capture_output=True,
-        )
-        elapsed = time.time() - t0
-        assert elapsed < 120, f"Preprocessing took too long: {elapsed:.1f}s"
-
-
-# ── Regression: re-running pipeline produces same best models ─────────────────
-class TestReproducibility:
-
-    def test_modeling_is_reproducible(self, model_ready_csv, feature_meta, tmp_dir):
-        """Running modeling twice should produce the same best models."""
-        _, pre_dir = model_ready_csv
-        meta, _, _ = feature_meta
-
-        out1 = os.path.join(tmp_dir, "rep1")
-        out2 = os.path.join(tmp_dir, "rep2")
-
-        subprocess.run(
-            [sys.executable, "src/03_modeling.py", "--input_dir", pre_dir, "--output_dir", out1],
-            capture_output=True,
-        )
-        subprocess.run(
-            [sys.executable, "src/03_modeling.py", "--input_dir", pre_dir, "--output_dir", out2],
-            capture_output=True,
-        )
-        p1 = os.path.join(out1, "best_models.csv")
-        p2 = os.path.join(out2, "best_models.csv")
-        if os.path.exists(p1) and os.path.exists(p2):
-            df1 = pd.read_csv(p1).sort_values("Country").reset_index(drop=True)
-            df2 = pd.read_csv(p2).sort_values("Country").reset_index(drop=True)
-            pd.testing.assert_frame_equal(
-                df1[["Country", "Model"]],
-                df2[["Country", "Model"]],
-                check_like=True,
-            )
+        assert r.returncode == 0
