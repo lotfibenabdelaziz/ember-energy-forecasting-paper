@@ -45,14 +45,15 @@ _OUT = os.getenv("OUTPUTS_DIR", "outputs")
 
 # ── Step result dataclass ─────────────────────────────────────────────────────
 
+
 @dataclass
 class StepResult:
     """Result of a single pipeline step execution."""
 
-    name:    str
-    status:  str        # "ran" | "cached" | "skipped" | "failed"
+    name: str
+    status: str  # "ran" | "cached" | "skipped" | "failed"
     elapsed: float = 0.0
-    error:   str   = ""
+    error: str = ""
 
     @property
     def success(self) -> bool:
@@ -61,18 +62,20 @@ class StepResult:
 
 # ── Pipeline config dataclass ─────────────────────────────────────────────────
 
+
 @dataclass
 class PipelineConfig:
     """All runtime configuration for a pipeline run."""
 
-    csv:            str
-    steps:          list[str]
-    train_until:    int
+    csv: str
+    steps: list[str]
+    train_until: int
     forecast_until: int
-    force:          bool = False
+    force: bool = False
 
 
 # ── Step registry ─────────────────────────────────────────────────────────────
+
 
 def build_step_definitions(cfg: PipelineConfig) -> list[StepDefinition]:
     """
@@ -81,66 +84,66 @@ def build_step_definitions(cfg: PipelineConfig) -> list[StepDefinition]:
     """
     return [
         StepDefinition(
-            name    = "eda",
-            script  = "src/01_eda.py",
-            deps    = [cfg.csv, "src/01_eda.py"],
-            params  = ["data", "countries"],
-            outputs = [
+            name="eda",
+            script="src/step01_eda.py",
+            deps=[cfg.csv, "src/step01_eda.py"],
+            params=["data", "countries"],
+            outputs=[
                 f"{_OUT}/eda/ember_filtered.csv",
                 f"{_OUT}/eda/table01_eda_statistics.csv",
             ],
         ),
         StepDefinition(
-            name    = "preprocessing",
-            script  = "src/02_preprocessing.py",
-            deps    = [
+            name="preprocessing",
+            script="src/step02_preprocessing.py",
+            deps=[
                 f"{_OUT}/eda/ember_filtered.csv",
-                "src/02_preprocessing.py",
+                "src/step02_preprocessing.py",
             ],
-            params  = ["splits", "features"],
-            outputs = [
+            params=["splits", "features"],
+            outputs=[
                 f"{_OUT}/preprocessing/ember_model_ready.csv",
                 f"{_OUT}/preprocessing/feature_meta.json",
             ],
         ),
         StepDefinition(
-            name    = "modeling",
-            script  = "src/03_modeling.py",
-            deps    = [
+            name="modeling",
+            script="src/step03_modeling.py",
+            deps=[
                 f"{_OUT}/preprocessing/ember_model_ready.csv",
                 f"{_OUT}/preprocessing/feature_meta.json",
                 "src/03_modeling.py",
             ],
-            params  = ["splits", "modeling"],
-            outputs = [
+            params=["splits", "modeling"],
+            outputs=[
                 f"{_OUT}/modeling/best_models.csv",
                 f"{_OUT}/modeling/best_hp.json",
             ],
         ),
         StepDefinition(
-            name    = "forecasting",
-            script  = "src/04_forecasting.py",
-            deps    = [
+            name="forecasting",
+            script="src/step04_forecasting.py",
+            deps=[
                 f"{_OUT}/modeling/best_models.csv",
                 f"{_OUT}/modeling/best_hp.json",
-                "src/04_forecasting.py",
+                "src/step04_forecasting.py",
             ],
-            params  = ["splits"],
-            outputs = [
+            params=["splits"],
+            outputs=[
                 f"{_OUT}/forecasting/demand_forecast_2025_2030.csv",
                 f"{_OUT}/forecasting/demand_growth_summary.csv",
             ],
         ),
         StepDefinition(
-            name    = "deeplearning",
-            script  = "src/05_deeplearning.py",
-            deps    = [
+            name="deeplearning",
+            script="src/step05_deeplearning.py",
+            deps=[
                 f"{_OUT}/preprocessing/ember_model_ready.csv",
                 f"{_OUT}/preprocessing/feature_meta.json",
-                "src/05_deeplearning.py",
+                "src/step05_deeplearning.py",
             ],
-            params  = ["splits", "deeplearning"],
-            outputs = [
+            params=["splits", "deeplearning"],
+            outputs=[
                 f"{_OUT}/deeplearning/dl_forecast_2025_2030.csv",
                 f"{_OUT}/deeplearning/dl_best_models.csv",
             ],
@@ -152,37 +155,52 @@ STEP_ORDER = ["eda", "preprocessing", "modeling", "forecasting", "deeplearning"]
 
 # ── CLI args for each step ────────────────────────────────────────────────────
 
+
 def build_step_args(name: str, cfg: PipelineConfig) -> list[str]:
     """Build the CLI argument list for a given step."""
     args_map: dict[str, list[str]] = {
         "eda": [
-            "--csv",        cfg.csv,
-            "--output_dir", f"{_OUT}/eda",
+            "--csv",
+            cfg.csv,
+            "--output_dir",
+            f"{_OUT}/eda",
         ],
         "preprocessing": [
-            "--input_dir",   f"{_OUT}/eda",
-            "--output_dir",  f"{_OUT}/preprocessing",
-            "--train_until", str(cfg.train_until),
+            "--input_dir",
+            f"{_OUT}/eda",
+            "--output_dir",
+            f"{_OUT}/preprocessing",
+            "--train_until",
+            str(cfg.train_until),
         ],
         "modeling": [
-            "--input_dir",  f"{_OUT}/preprocessing",
-            "--output_dir", f"{_OUT}/modeling",
+            "--input_dir",
+            f"{_OUT}/preprocessing",
+            "--output_dir",
+            f"{_OUT}/modeling",
         ],
         "forecasting": [
-            "--pre_dir",        f"{_OUT}/preprocessing",
-            "--model_dir",      f"{_OUT}/modeling",
-            "--output_dir",     f"{_OUT}/forecasting",
-            "--forecast_until", str(cfg.forecast_until),
+            "--pre_dir",
+            f"{_OUT}/preprocessing",
+            "--model_dir",
+            f"{_OUT}/modeling",
+            "--output_dir",
+            f"{_OUT}/forecasting",
+            "--forecast_until",
+            str(cfg.forecast_until),
         ],
         "deeplearning": [
-            "--pre_dir",    f"{_OUT}/preprocessing",
-            "--output_dir", f"{_OUT}/deeplearning",
+            "--pre_dir",
+            f"{_OUT}/preprocessing",
+            "--output_dir",
+            f"{_OUT}/deeplearning",
         ],
     }
     return args_map[name]
 
 
 # ── Runner ────────────────────────────────────────────────────────────────────
+
 
 def run_step(name: str, script: str, extra_args: list[str]) -> StepResult:
     """Execute a single pipeline step as a subprocess."""
@@ -196,14 +214,16 @@ def run_step(name: str, script: str, extra_args: list[str]) -> StepResult:
 
     if result.returncode != 0:
         log.error("╚══ FAILED: %s (exit=%d) in %.1fs", name, result.returncode, elapsed)
-        return StepResult(name=name, status="failed", elapsed=elapsed,
-                          error=f"exit code {result.returncode}")
+        return StepResult(
+            name=name, status="failed", elapsed=elapsed, error=f"exit code {result.returncode}"
+        )
 
     log.info("╚══ DONE: %s in %.1fs", name, elapsed)
     return StepResult(name=name, status="ran", elapsed=elapsed)
 
 
 # ── Arg parser ────────────────────────────────────────────────────────────────
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Ember full pipeline")
@@ -260,8 +280,9 @@ def parse_args() -> argparse.Namespace:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
-    args  = parse_args()
+    args = parse_args()
     cache = StepCache()
 
     # ── Cache utility commands ────────────────────────────────────────────────
@@ -286,12 +307,12 @@ def main() -> None:
         return
 
     # ── Build config and step definitions ────────────────────────────────────
-    cfg   = PipelineConfig(
-        csv            = args.csv,
-        steps          = args.steps,
-        train_until    = args.train_until,
-        forecast_until = args.forecast_until,
-        force          = args.force,
+    cfg = PipelineConfig(
+        csv=args.csv,
+        steps=args.steps,
+        train_until=args.train_until,
+        forecast_until=args.forecast_until,
+        force=args.force,
     )
     step_defs = {s.name: s for s in build_step_definitions(cfg)}
 
@@ -334,8 +355,8 @@ def main() -> None:
 
     # ── Summary ───────────────────────────────────────────────────────────────
     elapsed = time.time() - t_total
-    ran     = [r.name for r in results if r.status == "ran"]
-    cached  = [r.name for r in results if r.status == "cached"]
+    ran = [r.name for r in results if r.status == "ran"]
+    cached = [r.name for r in results if r.status == "cached"]
     skipped = [r.name for r in results if r.status == "skipped"]
 
     log.info("=" * 60)

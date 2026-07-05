@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Model 1 — MLP (Multi-Layer Perceptron)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class MLPForecaster(nn.Module):
     """
@@ -37,15 +38,15 @@ class MLPForecaster(nn.Module):
 
     def __init__(
         self,
-        seq_len:    int,
+        seq_len: int,
         n_features: int,
-        hidden:     tuple[int, ...] = (256, 128, 64),
-        dropout:    tuple[float, ...] = (0.3, 0.2),
+        hidden: tuple[int, ...] = (256, 128, 64),
+        dropout: tuple[float, ...] = (0.3, 0.2),
     ) -> None:
         super().__init__()
         in_dim = seq_len * n_features
         layers: list[nn.Module] = []
-        prev  = in_dim
+        prev = in_dim
         drops = list(dropout) + [0.0] * len(hidden)
 
         for i, h in enumerate(hidden):
@@ -70,6 +71,7 @@ class MLPForecaster(nn.Module):
 # Model 2 — TCN (Temporal Convolutional Network)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class CausalConv1d(nn.Module):
     """Conv1d with left-padding to ensure causal (no future leakage)."""
 
@@ -92,10 +94,10 @@ class TCNBlock(nn.Module):
         self, in_ch: int, out_ch: int, kernel_size: int, dilation: int, dropout: float = 0.2
     ) -> None:
         super().__init__()
-        self.conv1 = CausalConv1d(in_ch,  out_ch, kernel_size, dilation)
+        self.conv1 = CausalConv1d(in_ch, out_ch, kernel_size, dilation)
         self.conv2 = CausalConv1d(out_ch, out_ch, kernel_size, dilation)
-        self.relu  = nn.ReLU()
-        self.drop  = nn.Dropout(dropout)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(dropout)
         self.downsample = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else None
         self.bn1 = nn.BatchNorm1d(out_ch)
         self.bn2 = nn.BatchNorm1d(out_ch)
@@ -120,11 +122,11 @@ class TCNForecaster(nn.Module):
 
     def __init__(
         self,
-        n_features:  int,
-        n_channels:  int = 64,
+        n_features: int,
+        n_channels: int = 64,
         kernel_size: int = 3,
-        dilations:   tuple[int, ...] = (1, 2, 4),
-        dropout:     float = 0.2,
+        dilations: tuple[int, ...] = (1, 2, 4),
+        dropout: float = 0.2,
     ) -> None:
         super().__init__()
         layers: list[nn.Module] = []
@@ -132,20 +134,21 @@ class TCNForecaster(nn.Module):
         for d in dilations:
             layers.append(TCNBlock(in_ch, n_channels, kernel_size, d, dropout))
             in_ch = n_channels
-        self.tcn    = nn.Sequential(*layers)
+        self.tcn = nn.Sequential(*layers)
         self.linear = nn.Linear(n_channels, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: [B, seq_len, n_features] -> transpose -> [B, n_features, seq_len]
         x = x.transpose(1, 2)
-        x = self.tcn(x)        # [B, n_channels, seq_len]
-        x = x[:, :, -1]        # last timestep
+        x = self.tcn(x)  # [B, n_channels, seq_len]
+        x = x[:, :, -1]  # last timestep
         return self.linear(x)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Model 3 — N-BEATS (Neural Basis Expansion Analysis)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class NBeatsBlock(nn.Module):
     """
@@ -161,13 +164,13 @@ class NBeatsBlock(nn.Module):
         self,
         input_size: int,
         theta_size: int,
-        horizon:    int,
-        n_layers:   int = 4,
-        hidden:     int = 128,
+        horizon: int,
+        n_layers: int = 4,
+        hidden: int = 128,
         basis_type: str = "generic",
     ) -> None:
         super().__init__()
-        self.horizon    = horizon
+        self.horizon = horizon
         self.basis_type = basis_type
         self.theta_size = theta_size
 
@@ -185,12 +188,8 @@ class NBeatsBlock(nn.Module):
         """Project theta through polynomial (trend) or identity (generic) basis."""
         if self.basis_type == "trend":
             p = torch.arange(self.theta_size, dtype=torch.float32, device=theta.device)
-            T = t.unsqueeze(-1) ** p.unsqueeze(0)   # [len(t), theta_size]
-            return (
-                torch.einsum("bt,Tt->bT", theta, T)
-                if theta.dim() == 2
-                else theta @ T.t()
-            )
+            T = t.unsqueeze(-1) ** p.unsqueeze(0)  # [len(t), theta_size]
+            return torch.einsum("bt,Tt->bT", theta, T) if theta.dim() == 2 else theta @ T.t()
 
         # Generic: learned linear mapping back to time axis
         L = len(t)
@@ -203,7 +202,7 @@ class NBeatsBlock(nn.Module):
     def forward(
         self, x: torch.Tensor, backcast_t: torch.Tensor, forecast_t: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        h       = self.fc(x)
+        h = self.fc(x)
         theta_b = self.theta_b(h)
         theta_f = self.theta_f(h)
         backcast = self.basis_expansion(theta_b, backcast_t)
@@ -224,11 +223,11 @@ class NBeatsForecaster(nn.Module):
 
     def __init__(
         self,
-        seq_len:      int,
-        horizon:      int = 1,
-        n_features:   int = 1,
+        seq_len: int,
+        horizon: int = 1,
+        n_features: int = 1,
         trend_degree: int = 3,
-        hidden:       int = 128,
+        hidden: int = 128,
     ) -> None:
         super().__init__()
         self.seq_len = seq_len
@@ -238,13 +237,21 @@ class NBeatsForecaster(nn.Module):
 
         # Trend stack
         self.trend_block = NBeatsBlock(
-            in_size, theta_size=trend_degree + 1, horizon=horizon,
-            n_layers=4, hidden=hidden, basis_type="trend",
+            in_size,
+            theta_size=trend_degree + 1,
+            horizon=horizon,
+            n_layers=4,
+            hidden=hidden,
+            basis_type="trend",
         )
         # Generic stack
         self.generic_block = NBeatsBlock(
-            in_size, theta_size=max(horizon, 4), horizon=horizon,
-            n_layers=4, hidden=hidden, basis_type="generic",
+            in_size,
+            theta_size=max(horizon, 4),
+            horizon=horizon,
+            n_layers=4,
+            hidden=hidden,
+            basis_type="generic",
         )
 
         # Time grids
@@ -253,15 +260,15 @@ class NBeatsForecaster(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: [B, seq_len, n_features]
-        x_flat = x.flatten(1)   # [B, seq_len * n_features]
+        x_flat = x.flatten(1)  # [B, seq_len * n_features]
 
         # Stack 1: Trend
         backcast1, forecast1 = self.trend_block(x_flat, self.backcast_t, self.forecast_t)
 
         # Residual — subtract backcast from the target (column 0) sub-sequence
-        demand_seq = x[:, :, 0]            # [B, seq_len]
-        residual   = demand_seq - backcast1
-        x_res      = x_flat.clone()
+        demand_seq = x[:, :, 0]  # [B, seq_len]
+        residual = demand_seq - backcast1
+        x_res = x_flat.clone()
         x_res[:, : self.seq_len] = residual
 
         # Stack 2: Generic (on residual)
@@ -275,20 +282,21 @@ class NBeatsForecaster(nn.Module):
 # Model 4 — TFT (Temporal Fusion Transformer) — lightweight
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class GatedResidualNetwork(nn.Module):
     """GRN: FC -> ELU -> FC -> GLU gate -> residual + LayerNorm."""
 
     def __init__(
         self,
-        d_in:        int,
-        d_hidden:    int,
-        d_out:       int,
-        dropout:     float = 0.1,
+        d_in: int,
+        d_hidden: int,
+        d_out: int,
+        dropout: float = 0.1,
         context_dim: int | None = None,
     ) -> None:
         super().__init__()
-        self.fc1  = nn.Linear(d_in + (context_dim or 0), d_hidden)
-        self.fc2  = nn.Linear(d_hidden, d_out * 2)   # *2 for GLU
+        self.fc1 = nn.Linear(d_in + (context_dim or 0), d_hidden)
+        self.fc2 = nn.Linear(d_hidden, d_out * 2)  # *2 for GLU
         self.gate = nn.GLU(dim=-1)
         self.norm = nn.LayerNorm(d_out)
         self.drop = nn.Dropout(dropout)
@@ -306,10 +314,10 @@ class VariableSelectionNetwork(nn.Module):
 
     def __init__(self, n_features: int, d_model: int, dropout: float = 0.1) -> None:
         super().__init__()
-        self.grns = nn.ModuleList([
-            GatedResidualNetwork(1, d_model, d_model, dropout) for _ in range(n_features)
-        ])
-        self.weight  = GatedResidualNetwork(n_features, d_model, n_features, dropout)
+        self.grns = nn.ModuleList(
+            [GatedResidualNetwork(1, d_model, d_model, dropout) for _ in range(n_features)]
+        )
+        self.weight = GatedResidualNetwork(n_features, d_model, n_features, dropout)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -318,10 +326,10 @@ class VariableSelectionNetwork(nn.Module):
 
         feat_emb = torch.stack(
             [self.grns[i](x[..., i : i + 1]) for i in range(num_feat)], dim=-2
-        )   # [B, T, F, d_model]
+        )  # [B, T, F, d_model]
 
-        weights = self.softmax(self.weight(x))   # [B, T, F]
-        out = (feat_emb * weights.unsqueeze(-1)).sum(dim=-2)   # [B, T, d_model]
+        weights = self.softmax(self.weight(x))  # [B, T, F]
+        out = (feat_emb * weights.unsqueeze(-1)).sum(dim=-2)  # [B, T, d_model]
         return out, weights
 
 
@@ -336,30 +344,28 @@ class TFTForecaster(nn.Module):
     def __init__(
         self,
         n_features: int,
-        d_model:    int = 32,
-        n_heads:    int = 2,
-        seq_len:    int = 5,
-        dropout:    float = 0.1,
+        d_model: int = 32,
+        n_heads: int = 2,
+        seq_len: int = 5,
+        dropout: float = 0.1,
     ) -> None:
         super().__init__()
-        self.vsn  = VariableSelectionNetwork(n_features, d_model, dropout)
+        self.vsn = VariableSelectionNetwork(n_features, d_model, dropout)
         self.lstm = nn.LSTM(d_model, d_model, num_layers=1, batch_first=True, dropout=0.0)
-        self.attn = nn.MultiheadAttention(
-            d_model, n_heads, dropout=dropout, batch_first=True
-        )
-        self.grn  = GatedResidualNetwork(d_model, d_model * 2, d_model, dropout)
+        self.attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
+        self.grn = GatedResidualNetwork(d_model, d_model * 2, d_model, dropout)
         self.norm = nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, 1)
         self._weights: torch.Tensor | None = None  # stored attention weights
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: [B, seq_len, n_features]
-        x_sel, _ = self.vsn(x)                       # [B, T, d_model]
-        enc, _   = self.lstm(x_sel)                  # [B, T, d_model]
+        x_sel, _ = self.vsn(x)  # [B, T, d_model]
+        enc, _ = self.lstm(x_sel)  # [B, T, d_model]
         attn_out, weights = self.attn(enc, enc, enc, need_weights=True)
-        self._weights = weights.detach().cpu()       # store for interpretability
+        self._weights = weights.detach().cpu()  # store for interpretability
         out = self.grn(self.norm(attn_out + enc))
-        return self.head(out[:, -1, :])              # last timestep
+        return self.head(out[:, -1, :])  # last timestep
 
     def get_attention_weights(self) -> torch.Tensor | None:
         return self._weights
@@ -368,6 +374,7 @@ class TFTForecaster(nn.Module):
 # ═══════════════════════════════════════════════════════════════════════════════
 # Model registry
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def build_model_registry(seq_len: int, n_features: int) -> dict[str, dict]:
     """
@@ -379,29 +386,40 @@ def build_model_registry(seq_len: int, n_features: int) -> dict[str, dict]:
         "MLP": {
             "cls": MLPForecaster,
             "kwargs": {
-                "seq_len": seq_len, "n_features": n_features,
-                "hidden": (256, 128, 64), "dropout": (0.3, 0.2),
+                "seq_len": seq_len,
+                "n_features": n_features,
+                "hidden": (256, 128, 64),
+                "dropout": (0.3, 0.2),
             },
         },
         "TCN": {
             "cls": TCNForecaster,
             "kwargs": {
-                "n_features": n_features, "n_channels": 64,
-                "kernel_size": 3, "dilations": (1, 2, 4), "dropout": 0.2,
+                "n_features": n_features,
+                "n_channels": 64,
+                "kernel_size": 3,
+                "dilations": (1, 2, 4),
+                "dropout": 0.2,
             },
         },
         "N-BEATS": {
             "cls": NBeatsForecaster,
             "kwargs": {
-                "seq_len": seq_len, "horizon": 1, "n_features": n_features,
-                "trend_degree": 3, "hidden": 128,
+                "seq_len": seq_len,
+                "horizon": 1,
+                "n_features": n_features,
+                "trend_degree": 3,
+                "hidden": 128,
             },
         },
         "TFT": {
             "cls": TFTForecaster,
             "kwargs": {
-                "n_features": n_features, "d_model": 32, "n_heads": 2,
-                "seq_len": seq_len, "dropout": 0.1,
+                "n_features": n_features,
+                "d_model": 32,
+                "n_heads": 2,
+                "seq_len": seq_len,
+                "dropout": 0.1,
             },
         },
     }

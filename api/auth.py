@@ -85,12 +85,10 @@ def create_access_token(
 ) -> str:
     """Create a signed JWT access token."""
     if not JWT_AVAILABLE:
-        raise RuntimeError(
-            "python-jose not installed — run: pip install python-jose[cryptography]")
+        raise RuntimeError("python-jose not installed — run: pip install python-jose[cryptography]")
     payload = data.copy()
     now = datetime.now(timezone.utc)
-    expire = now + \
-        (expires_delta or timedelta(minutes=_token_expire_minutes()))
+    expire = now + (expires_delta or timedelta(minutes=_token_expire_minutes()))
     payload.update({"exp": expire, "iat": now})
     return jwt.encode(payload, _secret_key(), algorithm=ALGORITHM)
 
@@ -101,8 +99,7 @@ def decode_token(token: str) -> dict:
     Raises HTTPException 401 on any failure.
     """
     if not JWT_AVAILABLE:
-        raise HTTPException(
-            status_code=501, detail="JWT not available — install python-jose")
+        raise HTTPException(status_code=501, detail="JWT not available — install python-jose")
     if token in _blacklist:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -112,12 +109,12 @@ def decode_token(token: str) -> dict:
     try:
         payload = jwt.decode(token, _secret_key(), algorithms=[ALGORITHM])
         return payload
-    except JWTError:
+    except JWTError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from err
 
 
 def revoke_token(token: str) -> None:
@@ -227,5 +224,4 @@ def optional_auth(
         return {"sub": "api-key-user", "role": "reader"}
     if not credentials and not key:
         return None  # no credentials — public access
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Invalid credentials")
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid credentials")

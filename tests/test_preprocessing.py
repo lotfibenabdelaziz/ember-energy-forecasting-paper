@@ -412,7 +412,7 @@ class TestPreprocessingCLI:
         df.to_csv(os.path.join(tmp_dir, "ember_filtered.csv"), index=False)
         out_dir = os.path.join(tmp_dir, "pre_out")
         result  = subprocess.run(
-            [sys.executable, "src/02_preprocessing.py",
+            [sys.executable, "src/step02_preprocessing.py",
              "--input_dir",  tmp_dir,
              "--output_dir", out_dir],
             capture_output=True, text=True
@@ -424,7 +424,7 @@ class TestPreprocessingCLI:
         df.to_csv(os.path.join(tmp_dir, "ember_filtered.csv"), index=False)
         out_dir = os.path.join(tmp_dir, "pre_out2")
         subprocess.run(
-            [sys.executable, "src/02_preprocessing.py",
+            [sys.executable, "src/step02_preprocessing.py",
              "--input_dir",  tmp_dir,
              "--output_dir", out_dir],
             capture_output=True
@@ -438,7 +438,7 @@ class TestPreprocessingCLI:
         df.to_csv(os.path.join(tmp_dir, "ember_filtered.csv"), index=False)
         out_dir = os.path.join(tmp_dir, "pre_out3")
         subprocess.run(
-            [sys.executable, "src/02_preprocessing.py",
+            [sys.executable, "src/step02_preprocessing.py",
              "--input_dir",  tmp_dir,
              "--output_dir", out_dir],
             capture_output=True
@@ -456,7 +456,7 @@ class TestPreprocessingCLI:
         df.to_csv(os.path.join(tmp_dir, "ember_filtered.csv"), index=False)
         out_dir = os.path.join(tmp_dir, "pre_out4")
         subprocess.run(
-            [sys.executable, "src/02_preprocessing.py",
+            [sys.executable, "src/step02_preprocessing.py",
              "--input_dir",  tmp_dir,
              "--output_dir", out_dir],
             capture_output=True
@@ -473,7 +473,7 @@ class TestPreprocessingCLI:
         df.to_csv(os.path.join(tmp_dir, "ember_filtered.csv"), index=False)
         out_dir = os.path.join(tmp_dir, "pre_out5")
         subprocess.run(
-            [sys.executable, "src/02_preprocessing.py",
+            [sys.executable, "src/step02_preprocessing.py",
              "--input_dir",  tmp_dir,
              "--output_dir", out_dir],
             capture_output=True
@@ -494,7 +494,7 @@ class TestPreprocessingCLI:
         df.to_csv(os.path.join(tmp_dir, "ember_filtered.csv"), index=False)
         out_dir = os.path.join(tmp_dir, "pre_out6")
         subprocess.run(
-            [sys.executable, "src/02_preprocessing.py",
+            [sys.executable, "src/step02_preprocessing.py",
              "--input_dir",  tmp_dir,
              "--output_dir", out_dir],
             capture_output=True
@@ -511,7 +511,7 @@ class TestPreprocessingCLI:
         df.to_csv(os.path.join(tmp_dir, "ember_filtered.csv"), index=False)
         out_dir = os.path.join(tmp_dir, "pre_out7")
         subprocess.run(
-            [sys.executable, "src/02_preprocessing.py",
+            [sys.executable, "src/step02_preprocessing.py",
              "--input_dir",  tmp_dir,
              "--output_dir", out_dir],
             capture_output=True
@@ -525,7 +525,7 @@ class TestPreprocessingCLI:
         df.to_csv(os.path.join(tmp_dir, "ember_filtered.csv"), index=False)
         out_dir = os.path.join(tmp_dir, "pre_out8")
         subprocess.run(
-            [sys.executable, "src/02_preprocessing.py",
+            [sys.executable, "src/step02_preprocessing.py",
              "--input_dir",  tmp_dir,
              "--output_dir", out_dir],
             capture_output=True

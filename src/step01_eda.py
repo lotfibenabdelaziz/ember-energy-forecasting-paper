@@ -182,9 +182,9 @@ def plot_distribution(df_demand: pd.DataFrame, fig_dir: str) -> None:
     data = [df_demand[df_demand["Area"] == c]["Value"].dropna().values for c in COUNTRIES]
     colors = [PALETTE[c] for c in COUNTRIES]
     bp = ax.boxplot(
-        data, patch_artist=True, labels=COUNTRIES, medianprops=dict(color="black", lw=1.8)
+        data, patch_artist=True, labels=COUNTRIES, medianprops={"color": "black", "lw": 1.8}
     )
-    for patch, color in zip(bp["boxes"], colors):
+    for patch, color in zip(bp["boxes"], colors, strict=False):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
     ax.set_title(f"{TARGET} Distribution per Country (TWh)", fontweight="bold")
@@ -255,7 +255,7 @@ def build_summary_table(df_demand: pd.DataFrame, output_dir: str) -> None:
                 "Country": c,
                 "2000 (TWh)": round(v_2000, 1),
                 "2024 (TWh)": round(v_2024, 1),
-                "Total Growth": f"{round((v_2024/v_2000 - 1)*100 if v_2000 else np.nan, 1)}%",
+                "Total Growth": f"{round((v_2024 / v_2000 - 1) * 100 if v_2000 else np.nan, 1)}%",
                 "Slope TWh/yr": round(slope, 2),
                 "Mean TWh": round(float(s.mean()), 1),
                 "Std TWh": round(float(s.std()), 1),

@@ -88,21 +88,21 @@ class TestStatisticalForecasters:
 class TestCleanX:
 
     def test_clean_x_removes_inf(self):
-        from src.forecasting.forecasters import clean_X
+        from src.forecasting.forecasters import clean_x
         arr = np.array([[1.0, np.inf], [2.0, 3.0]])
-        out = clean_X(arr)
+        out = clean_x(arr)
         assert np.isfinite(out).all()
 
     def test_clean_x_removes_nan(self):
-        from src.forecasting.forecasters import clean_X
+        from src.forecasting.forecasters import clean_x
         arr = np.array([[1.0, np.nan], [2.0, 4.0]])
-        out = clean_X(arr)
+        out = clean_x(arr)
         assert not np.isnan(out).any()
 
     def test_clean_x_uses_median(self):
-        from src.forecasting.forecasters import clean_X
+        from src.forecasting.forecasters import clean_x
         arr = np.array([[1.0], [3.0], [np.nan]])
-        out = clean_X(arr)
+        out = clean_x(arr)
         assert out[2, 0] == pytest.approx(2.0, abs=0.01)
 
 

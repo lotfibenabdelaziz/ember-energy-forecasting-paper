@@ -34,12 +34,14 @@ import numpy as np
 import pandas as pd
 
 from src.forecasting.forecasters import (
-    bootstrap_forecast_ci, get_ml_cls_map,
+    bootstrap_forecast_ci,
+    get_ml_cls_map,
 )
-from src.forecasting.recursive import point_forecast
 from src.forecasting.growth import compute_growth_summary
 from src.forecasting.plots import (
-    plot_forecast_per_country, plot_forecast_overlay, plot_growth_uncertainty,
+    plot_forecast_overlay,
+    plot_forecast_per_country,
+    plot_growth_uncertainty,
 )
 
 warnings.filterwarnings("ignore")
@@ -52,22 +54,23 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
-TARGET    = "Demand"
+TARGET = "Demand"
 
 STAT_MODELS = {"Naive", "Naïve", "LinearTrend", "Holt", "ARIMA(1,1,1)", "ARIMA_1_1_1"}
 
 
 # ── Generate forecasts for all countries (with fallback chain) ───────────────
 
+
 def generate_all_forecasts(
-    df:             pd.DataFrame,
-    best_df:        pd.DataFrame,
-    all_features:   list[str],
-    raw_features:   list[str],
+    df: pd.DataFrame,
+    best_df: pd.DataFrame,
+    all_features: list[str],
+    raw_features: list[str],
     forecast_years: list[int],
-    target:         str,
-    params_map:     dict,
-    ml_cls_map:     dict,
+    target: str,
+    params_map: dict,
+    ml_cls_map: dict,
 ) -> tuple[pd.DataFrame, dict]:
     """
     Generate forecasts for all countries with fallback chain:
@@ -78,13 +81,13 @@ def generate_all_forecasts(
     model_used: dict[str, str] = {}
 
     for country in COUNTRIES:
-        hist_df    = df[df["Area"] == country].sort_values("Year").reset_index(drop=True)
-        best_row   = best_df[best_df["Country"] == country]
+        hist_df = df[df["Area"] == country].sort_values("Year").reset_index(drop=True)
+        best_row = best_df[best_df["Country"] == country]
         if best_row.empty:
             log.warning("No best model for %s — skipping", country)
             continue
         best_model = best_row["Model"].values[0]
-        params     = params_map.get(best_model, {})
+        params = params_map.get(best_model, {})
 
         log.info("  %-10s | %-16s ...", country, best_model)
 
@@ -93,39 +96,54 @@ def generate_all_forecasts(
 
         try:
             fc, lo, hi = bootstrap_forecast_ci(
-                hist_df, best_model, all_features, raw_features, params,
-                horizon, target, ml_cls_map,
+                hist_df,
+                best_model,
+                all_features,
+                raw_features,
+                params,
+                horizon,
+                target,
+                ml_cls_map,
             )
         except Exception as e1:
             log.warning("    Best model failed: %s: %s", type(e1).__name__, e1)
             log.info("    Trying Holt fallback...")
             try:
                 fc, lo, hi = bootstrap_forecast_ci(
-                    hist_df, "Holt", all_features, raw_features, {},
-                    horizon, target, ml_cls_map,
+                    hist_df,
+                    "Holt",
+                    all_features,
+                    raw_features,
+                    {},
+                    horizon,
+                    target,
+                    ml_cls_map,
                 )
                 used_model = "Holt (fallback)"
             except Exception as e2:
                 log.warning("    Holt failed too: %s", e2)
                 from src.forecasting.forecasters import forecast_statistical
-                ts  = hist_df[target].values.astype(float)
-                fc  = forecast_statistical(ts, "LinearTrend", horizon)
+
+                ts = hist_df[target].values.astype(float)
+                fc = forecast_statistical(ts, "LinearTrend", horizon)
                 std = np.std(ts) * 0.10
-                lo  = fc - 1.645 * std
-                hi  = fc + 1.645 * std
+                lo = fc - 1.645 * std
+                hi = fc + 1.645 * std
                 used_model = "LinearTrend (last resort)"
 
         model_used[country] = used_model
 
         for i, yr in enumerate(forecast_years):
-            fc_records.append({
-                "Country":  country,
-                "Year":     yr,
-                "Forecast": round(float(fc[i]), 2),
-                "Lower_90": round(float(lo[i]), 2),
-                "Upper_90": round(float(hi[i]), 2),
-                "Model":    used_model,
-            })
+            fc_records.append(
+                {
+                    "Country": country,
+                    "Year": yr,
+                    "Forecast": round(float(fc[i]), 2),
+                    "Lower_90": round(float(lo[i]), 2),
+                    "Upper_90": round(float(hi[i]), 2),
+                    "Model": used_model,
+                }
+            )
 
     fc_df = pd.DataFrame(fc_records)
 
@@ -138,25 +156,26 @@ def generate_all_forecasts(
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Ember forecasting step")
-    p.add_argument("--pre_dir",        default="outputs/preprocessing", help="Preprocessing dir")
-    p.add_argument("--model_dir",      default="outputs/modeling",      help="Modeling dir")
-    p.add_argument("--output_dir",     default="outputs/forecasting",   help="Output dir")
-    p.add_argument("--forecast_until", type=int, default=2030,          help="Last forecast year")
+    p.add_argument("--pre_dir", default="outputs/preprocessing", help="Preprocessing dir")
+    p.add_argument("--model_dir", default="outputs/modeling", help="Modeling dir")
+    p.add_argument("--output_dir", default="outputs/forecasting", help="Output dir")
+    p.add_argument("--forecast_until", type=int, default=2030, help="Last forecast year")
     return p.parse_args()
 
 
 def main() -> None:
-    args    = parse_args()
+    args = parse_args()
     fig_dir = os.path.join(args.output_dir, "figures")
     os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(fig_dir,         exist_ok=True)
+    os.makedirs(fig_dir, exist_ok=True)
 
     forecast_years = list(range(2025, args.forecast_until + 1))
 
     # Load
-    df      = pd.read_csv(os.path.join(args.pre_dir, "ember_model_ready.csv"))
+    df = pd.read_csv(os.path.join(args.pre_dir, "ember_model_ready.csv"))
     best_df = pd.read_csv(os.path.join(args.model_dir, "best_models.csv"))
     with open(os.path.join(args.pre_dir, "feature_meta.json")) as f:
         meta = json.load(f)
@@ -171,12 +190,22 @@ def main() -> None:
 
     # Load tuned hyperparameters
     params_map = {
-        "Ridge":        {"alpha": 1.0},
+        "Ridge": {"alpha": 1.0},
         "RandomForest": {"n_estimators": 100, "random_state": 42, "n_jobs": -1},
-        "XGBoost":      {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3,
-                         "tree_method": "hist", "verbosity": 0, "random_state": 42},
-        "Holt": {}, "ARIMA(1,1,1)": {}, "ARIMA_1_1_1": {},
-        "LinearTrend": {}, "Naive": {}, "Naïve": {},
+        "XGBoost": {
+            "n_estimators": 100,
+            "learning_rate": 0.1,
+            "max_depth": 3,
+            "tree_method": "hist",
+            "verbosity": 0,
+            "random_state": 42,
+        },
+        "Holt": {},
+        "ARIMA(1,1,1)": {},
+        "ARIMA_1_1_1": {},
+        "LinearTrend": {},
+        "Naive": {},
+        "Naïve": {},
     }
     best_hp_path = os.path.join(args.model_dir, "best_hp.json")
     if os.path.exists(best_hp_path):
@@ -191,11 +220,18 @@ def main() -> None:
     ml_cls_map = get_ml_cls_map()
 
     # Generate forecasts
-    log.info("── Generating forecasts for %d countries x %d years…",
-             len(COUNTRIES), len(forecast_years))
-    fc_df, model_used = generate_all_forecasts(
-        df, best_df, all_features, raw_features, forecast_years,
-        TARGET, params_map, ml_cls_map,
+    log.info(
+        "── Generating forecasts for %d countries x %d years…", len(COUNTRIES), len(forecast_years)
+    )
+    fc_df, _model_used = generate_all_forecasts(
+        df,
+        best_df,
+        all_features,
+        raw_features,
+        forecast_years,
+        TARGET,
+        params_map,
+        ml_cls_map,
     )
     log.info("Forecast table: %s", fc_df.shape)
 

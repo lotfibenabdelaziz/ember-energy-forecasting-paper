@@ -139,17 +139,16 @@ app = FastAPI(
 
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS",
-    "*" if os.getenv("ENV") == "development" else
-    "http://localhost:8000,http://127.0.0.1:8000"
+    "*" if os.getenv("ENV") == "development" else "http://localhost:8000,http://127.0.0.1:8000",
 ).split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins     = ALLOWED_ORIGINS,
-    allow_methods     = ["GET", "POST", "OPTIONS"],
-    allow_headers     = ["Authorization", "X-API-Key", "Content-Type", "*"],
-    allow_credentials = True,
-    max_age           = 600,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "X-API-Key", "Content-Type", "*"],
+    allow_credentials=True,
+    max_age=600,
 )
 
 
@@ -254,8 +253,7 @@ def _metrics_dict(row: pd.Series) -> dict[str, Any]:
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    log.error("Unhandled exception: %s %s — %s",
-              request.method, request.url, exc)
+    log.error("Unhandled exception: %s %s — %s", request.method, request.url, exc)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
@@ -526,8 +524,7 @@ def compare_forecasts(country: str) -> dict:
             }
 
     if not _DATA["dl_forecast"].empty:
-        sub = _DATA["dl_forecast"][_DATA["dl_forecast"]
-                                   ["Country"] == country].sort_values("Year")
+        sub = _DATA["dl_forecast"][_DATA["dl_forecast"]["Country"] == country].sort_values("Year")
         if not sub.empty:
             result["deeplearning"] = {
                 "model": sub["Model"].iloc[0] if "Model" in sub.columns else "dl",
@@ -631,19 +628,17 @@ def _build_context() -> str:
     lines = ["Ember Energy Forecasting — Summary\n"]
     if not _DATA["forecast"].empty:
         for country in COUNTRIES:
-            sub = _DATA["forecast"][_DATA["forecast"]
-                                    ["Country"] == country].sort_values("Year")
+            sub = _DATA["forecast"][_DATA["forecast"]["Country"] == country].sort_values("Year")
             if not sub.empty:
                 lines.append(
-                    f"{country}: {sub['Year'].iloc[0]}={round(sub['Forecast'].iloc[0],2)} TWh"
-                    f" → {sub['Year'].iloc[-1]}={round(sub['Forecast'].iloc[-1],2)} TWh"
+                    f"{country}: {sub['Year'].iloc[0]}={round(sub['Forecast'].iloc[0], 2)} TWh"
+                    f" → {sub['Year'].iloc[-1]}={round(sub['Forecast'].iloc[-1], 2)} TWh"
                 )
     if not _DATA["growth"].empty:
         for country in COUNTRIES:
             sub = _DATA["growth"][_DATA["growth"]["Country"] == country]
             if not sub.empty and "CAGR (%)" in sub.columns:
-                lines.append(
-                    f"{country}: CAGR={round(float(sub.iloc[0]['CAGR (%)']),2)}%")
+                lines.append(f"{country}: CAGR={round(float(sub.iloc[0]['CAGR (%)']), 2)}%")
     return "\n".join(lines)
 
 
@@ -667,32 +662,47 @@ def _langchain_answer(question: str) -> str:
 def _rule_based_answer(question: str) -> str:
     q = question.lower()
 
-    if any(w in q for w in ["highest", "largest", "most", "biggest"]):
-        if not _DATA["forecast"].empty:
-            avg = _DATA["forecast"].groupby("Country")["Forecast"].mean()
-            top = avg.idxmax()
-            return f"{top} has the highest average demand at {round(avg[top],1)} TWh (2025-2030)."
+    # if any(w in q for w in ["highest", "largest", "most", "biggest"]):
+    #     if not _DATA["forecast"].empty:
+    #         avg = _DATA["forecast"].groupby("Country")["Forecast"].mean()
+    #         top = avg.idxmax()
+    #         return f"{top} has the highest average demand at {round(avg[top], 1)} TWh (2025-2030)."
 
-    if any(w in q for w in ["growth", "cagr", "growing", "fastest"]):
-        if not _DATA["growth"].empty:
-            df = _DATA["growth"].copy()
-            if "CAGR (%)" in df.columns:
-                df["CAGR (%)"] = pd.to_numeric(df["CAGR (%)"], errors="coerce")
-                row = df.loc[df["CAGR (%)"].idxmax()]
-                return (
-                    f"{row['Country']} has the highest CAGR at "
-                    f"{round(float(row['CAGR (%)']),2)}% (2024-2030)."
-                )
+    # if any(w in q for w in ["growth", "cagr", "growing", "fastest"]):
+    #     if not _DATA["growth"].empty:
+    #         df = _DATA["growth"].copy()
+    #         if "CAGR (%)" in df.columns:
+    #             df["CAGR (%)"] = pd.to_numeric(df["CAGR (%)"], errors="coerce")
+    #             row = df.loc[df["CAGR (%)"].idxmax()]
+    #             return (
+    #                 f"{row['Country']} has the highest CAGR at "
+    #                 f"{round(float(row['CAGR (%)']), 2)}% (2024-2030)."
+    #             )
+    if (
+        any(w in q for w in ["highest", "largest", "most", "biggest"])
+        and not _DATA["forecast"].empty
+    ):
+        avg = _DATA["forecast"].groupby("Country")["Forecast"].mean()
+        top = avg.idxmax()
+        return f"{top} has the highest average demand at {round(avg[top], 1)} TWh (2025-2030)."
+    if any(w in q for w in ["growth", "cagr", "growing", "fastest"]) and not _DATA["growth"].empty:
+        df = _DATA["growth"].copy()
+        if "CAGR (%)" in df.columns:
+            df["CAGR (%)"] = pd.to_numeric(df["CAGR (%)"], errors="coerce")
+            row = df.loc[df["CAGR (%)"].idxmax()]
+            return (
+                f"{row['Country']} has the highest CAGR at "
+                f"{round(float(row['CAGR (%)']), 2)}% (2024-2030)."
+            )
 
     for country in COUNTRIES:
-        if country.lower() in q:
-            if not _DATA["forecast"].empty:
-                sub = _DATA["forecast"][_DATA["forecast"]
-                                        ["Country"] == country].sort_values("Year")
-                if not sub.empty:
-                    return f"{country} demand forecast: " + ", ".join(
-                        f"{y}: {round(v,1)} TWh" for y, v in zip(sub["Year"], sub["Forecast"])
-                    )
+        if country.lower() in q and not _DATA["forecast"].empty:
+            sub = _DATA["forecast"][_DATA["forecast"]["Country"] == country].sort_values("Year")
+            if not sub.empty:
+                return f"{country} demand forecast: " + ", ".join(
+                    f"{y}: {round(v, 1)} TWh"
+                    for y, v in zip(sub["Year"], sub["Forecast"], strict=False)
+                )
 
     return (
         f"I can answer questions about electricity demand forecasts for "

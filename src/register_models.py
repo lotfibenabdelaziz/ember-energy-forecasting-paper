@@ -3,20 +3,12 @@ src/register_models.py — Register Best Models to MLflow Registry
 =================================================================
 Ember Energy | IEEE Paper
 
-Run after make run to register and promote best models:
-    python src/register_models.py
+Registers ALL best models per country — both statistical and ML.
+Statistical models (Naive, Holt, ARIMA) are registered with metadata only
+(no artifact — they have no learnable weights to persist).
+ML models (Ridge, RF, XGBoost) are registered with full sklearn artifact.
 
-What it does:
-  1. Loads best_models.csv + best_hp.json from outputs/modeling/
-  2. Loads dl_best_models.csv from outputs/deeplearning/
-  3. Refits each best classical model on full Train+Val data
-  4. Logs model artifact + MAPE to MLflow
-  5. Registers to MLflow Model Registry
-  6. Auto-promotes to Production if beats existing Production MAPE
-  7. Prints registry summary
-
-Stages:
-    None → Staging → Production → Archived
+Stages: None → Staging → Production → Archived
 """
 
 from __future__ import annotations
@@ -24,8 +16,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sys
 
+import mlflow
+import mlflow.sklearn
 import pandas as pd
 
 logging.basicConfig(
@@ -35,46 +28,70 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-COUNTRIES  = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
-TARGET     = "Demand"
-TRAIN_END  = 2016
-VAL_END    = 2020
+COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
+TARGET = "Demand"
+VAL_END = 2020
+
+# Models that have no sklearn artifact to persist
+STAT_MODELS = {"Naive", "Naïve", "LinearTrend", "Holt", "ARIMA_1_1_1", "ARIMA(1,1,1)"}
+ML_MODELS = {"Ridge", "RandomForest", "XGBoost"}
+
+
+def _build_sklearn_model(model_name: str, best_hp: dict):
+    """Instantiate and return a fitted-ready sklearn model."""
+    if model_name == "Ridge":
+        from sklearn.linear_model import Ridge
+
+        return Ridge(**best_hp.get("Ridge", {"alpha": 1.0}))
+    elif model_name == "RandomForest":
+        from sklearn.ensemble import RandomForestRegressor
+
+        return RandomForestRegressor(
+            **best_hp.get("RandomForest", {"n_estimators": 100}),
+            random_state=42,
+            n_jobs=-1,
+        )
+    elif model_name == "XGBoost":
+        import xgboost as xgb
+
+        return xgb.XGBRegressor(
+            **best_hp.get("XGBoost", {}),
+            verbosity=0,
+            tree_method="hist",
+        )
+    raise ValueError(f"Unknown ML model: {model_name}")
 
 
 def register_classical(
     model_dir: str,
-    pre_dir:   str,
-    outputs_dir: str,
+    pre_dir: str,
 ) -> None:
-    """Register best classical models from outputs/modeling/."""
-    try:
-        import mlflow
-        import mlflow.sklearn
-        from sklearn.linear_model import Ridge
-        from sklearn.ensemble import RandomForestRegressor
+    """
+    Register ALL best classical models — statistical and ML alike.
 
-        from mlflow_config import (
-            setup_experiment, compare_and_promote,
-            register_best_model, registry_summary,
-        )
-        from src.modeling.features import prepare_xy
-    except ImportError as e:
-        log.error("Missing dependency: %s", e)
-        return
+    Statistical models  → logged with params + MAPE, no artifact
+    ML models (sklearn) → logged with params + MAPE + model artifact
+    """
+    from mlflow_config import (
+        compare_and_promote,
+        register_best_model,
+        setup_experiment,
+    )
+    from src.modeling.features import prepare_xy
 
-    # Load artifacts
+    # ── Load artifacts ────────────────────────────────────────────────────────
     best_models_path = os.path.join(model_dir, "best_models.csv")
-    best_hp_path     = os.path.join(model_dir, "best_hp.json")
-    meta_path        = os.path.join(pre_dir, "feature_meta.json")
-    data_path        = os.path.join(pre_dir, "ember_model_ready.csv")
+    best_hp_path = os.path.join(model_dir, "best_hp.json")
+    meta_path = os.path.join(pre_dir, "feature_meta.json")
+    data_path = os.path.join(pre_dir, "ember_model_ready.csv")
 
     for path in [best_models_path, best_hp_path, meta_path, data_path]:
         if not os.path.exists(path):
             log.error("Missing: %s — run make run first", path)
             return
 
-    best_df  = pd.read_csv(best_models_path)
-    df       = pd.read_csv(data_path)
+    best_df = pd.read_csv(best_models_path)
+    df = pd.read_csv(data_path)
     with open(best_hp_path) as f:
         best_hp = json.load(f)
     with open(meta_path) as f:
@@ -86,94 +103,88 @@ def register_classical(
     log.info("── Registering classical models (%d countries)…", len(COUNTRIES))
 
     for _, row in best_df.iterrows():
-        country    = row["Country"]
+        country = row["Country"]
         model_name = row["Model"]
-        mape       = float(row["MAPE"])
+        mape = float(row["MAPE"])
 
-        # Only register sklearn models (not statistical)
-        if model_name not in ("Ridge", "RandomForest", "XGBoost"):
-            log.info("  %-10s %-14s — skipped (statistical model)", country, model_name)
-            continue
+        log.info("  %-10s | %-16s | MAPE=%.2f%%", country, model_name, mape)
 
-        sub      = df[df["Area"] == country]
-        train_df = sub[sub["Year"] <= VAL_END].reset_index(drop=True)
-        X_tr, y_tr = prepare_xy(train_df, good_features, TARGET)
-
-        # Build model
-        if model_name == "Ridge":
-            from sklearn.preprocessing import StandardScaler
-            scaler = StandardScaler()
-            X_tr   = scaler.fit_transform(X_tr)
-            model  = Ridge(**best_hp.get("Ridge", {"alpha": 1.0}))
-        elif model_name == "RandomForest":
-            model  = RandomForestRegressor(
-                **best_hp.get("RandomForest", {"n_estimators": 100}),
-                random_state=42, n_jobs=-1,
-            )
-        elif model_name == "XGBoost":
-            try:
-                import xgboost as xgb
-                model = xgb.XGBRegressor(
-                    **best_hp.get("XGBoost", {}),
-                    verbosity=0, tree_method="hist",
-                )
-            except ImportError:
-                log.warning("XGBoost not installed — skipping %s", country)
-                continue
-        else:
-            continue
-
-        model.fit(X_tr, y_tr)
-
-        # Log + register
         try:
-            with mlflow.start_run(
-                run_name=f"{country}_{model_name}_registry"
-            ) as run:
-                mlflow.set_tag("country",    country)
+            with mlflow.start_run(run_name=f"{country}_{model_name}_registry") as run:
+                # Tags
+                mlflow.set_tag("country", country)
                 mlflow.set_tag("model_type", "classical")
                 mlflow.set_tag("model_name", model_name)
-                mlflow.log_metric("MAPE", mape)
-                mlflow.log_params(best_hp.get(model_name, {}))
-                mlflow.sklearn.log_model(model, "model")
+                mlflow.set_tag("is_statistical", str(model_name in STAT_MODELS))
 
+                # Metrics
+                mlflow.log_metric("MAPE", mape)
+
+                # Params
+                if model_name in ML_MODELS:
+                    mlflow.log_params(best_hp.get(model_name, {}))
+                else:
+                    # Statistical model params
+                    stat_params = {
+                        "Holt": {"trend": "add", "damped_trend": True},
+                        "ARIMA_1_1_1": {"p": 1, "d": 1, "q": 1},
+                        "ARIMA(1,1,1)": {"p": 1, "d": 1, "q": 1},
+                        "Naive": {"type": "persistence"},
+                        "Naïve": {"type": "persistence"},
+                        "LinearTrend": {"type": "OLS_on_time_index"},
+                    }
+                    mlflow.log_params(stat_params.get(model_name, {}))
+
+                # Artifact — only for sklearn models
+                artifact_path = "none"
+                if model_name in ML_MODELS:
+                    sub = df[df["Area"] == country]
+                    train_df = sub[sub["Year"] <= VAL_END].reset_index(drop=True)
+                    X_tr, y_tr = prepare_xy(train_df, good_features, TARGET)
+
+                    if model_name == "Ridge":
+                        from sklearn.preprocessing import StandardScaler
+
+                        X_tr = StandardScaler().fit_transform(X_tr)
+
+                    model = _build_sklearn_model(model_name, best_hp)
+                    model.fit(X_tr, y_tr)
+                    mlflow.sklearn.log_model(model, "model")
+                    artifact_path = "model"
+
+                # Register to Model Registry
                 version = register_best_model(
-                    run_id      = run.info.run_id,
-                    country     = country,
-                    model_name  = model_name,
-                    model_type  = "classical",
+                    run_id=run.info.run_id,
+                    country=country,
+                    model_name=model_name,
+                    model_type="classical",
+                    artifact_path=artifact_path,
                 )
 
                 if version:
                     promoted = compare_and_promote(
-                        country     = country,
-                        new_run_id  = run.info.run_id,
-                        new_mape    = mape,
-                        new_version = version,
-                        model_type  = "classical",
+                        country=country,
+                        new_run_id=run.info.run_id,
+                        new_mape=mape,
+                        new_version=version,
+                        model_type="classical",
                     )
                     stage = "Production" if promoted else "Staging"
-                    log.info("  ✓ %-10s %-14s MAPE=%.2f%% → %s v%s",
-                             country, model_name, mape, stage, version)
+                    log.info("  ✓ %-10s %-16s → %s v%s", country, model_name, stage, version)
                 else:
-                    log.warning("  ✗ %-10s %-14s registration failed", country, model_name)
+                    log.warning("  ✗ %-10s %-16s registration failed", country, model_name)
 
         except Exception as e:
-            log.error("  ✗ %-10s %-14s error: %s", country, model_name, e)
+            log.error("  ✗ %-10s %-16s error: %s", country, model_name, e)
 
 
 def register_dl(dl_dir: str) -> None:
-    """Register best DL models from outputs/deeplearning/."""
-    try:
-        import mlflow
-        import mlflow.pytorch
-        from mlflow_config import (
-            setup_experiment, compare_and_promote,
-            register_best_model,
-        )
-    except ImportError as e:
-        log.error("Missing dependency: %s", e)
-        return
+    """Register best DL models — metadata + MAPE (no PyTorch artifact yet)."""
+    from mlflow_config import (
+        compare_and_promote,
+        register_best_model,
+        setup_experiment,
+    )
 
     best_dl_path = os.path.join(dl_dir, "dl_best_models.csv")
     if not os.path.exists(best_dl_path):
@@ -182,45 +193,46 @@ def register_dl(dl_dir: str) -> None:
 
     best_dl = pd.read_csv(best_dl_path)
     setup_experiment()
-
-    log.info("── Registering DL models (%d countries)…", len(best_dl))
+    log.info("── Registering DL models (%d entries)…", len(best_dl))
 
     for _, row in best_dl.iterrows():
-        country    = row["Country"]
+        country = row["Country"]
         model_name = row["Model"]
-        mape       = float(row["MAPE"]) if "MAPE" in row else float("nan")
+        mape = float(row["MAPE"]) if "MAPE" in row else float("nan")
 
         try:
-            with mlflow.start_run(
-                run_name=f"{country}_{model_name}_DL_registry"
-            ) as run:
-                mlflow.set_tag("country",    country)
+            with mlflow.start_run(run_name=f"{country}_{model_name}_DL_registry") as run:
+                mlflow.set_tag("country", country)
                 mlflow.set_tag("model_type", "dl")
                 mlflow.set_tag("model_name", model_name)
                 if mape == mape:  # not NaN
                     mlflow.log_metric("MAPE", mape)
 
-                # Note: actual PyTorch model logging requires the fitted model object
-                # which is not persisted after 05_deeplearning.py runs.
-                # To enable: modify 05_deeplearning.py to save models with torch.save()
-                # and load them here before mlflow.pytorch.log_model()
-
                 version = register_best_model(
-                    run_id     = run.info.run_id,
-                    country    = country,
-                    model_name = model_name,
-                    model_type = "dl",
+                    run_id=run.info.run_id,
+                    country=country,
+                    model_name=model_name,
+                    model_type="dl",
+                    artifact_path="none",
                 )
 
                 if version and mape == mape:
-                    compare_and_promote(
-                        country     = country,
-                        new_run_id  = run.info.run_id,
-                        new_mape    = mape,
-                        new_version = version,
-                        model_type  = "dl",
+                    promoted = compare_and_promote(
+                        country=country,
+                        new_run_id=run.info.run_id,
+                        new_mape=mape,
+                        new_version=version,
+                        model_type="dl",
                     )
-                    log.info("  ✓ %-10s %-14s MAPE=%.2f%% v%s", country, model_name, mape, version)
+                    stage = "Production" if promoted else "Staging"
+                    log.info(
+                        "  ✓ %-10s %-14s MAPE=%.2f%% → %s v%s",
+                        country,
+                        model_name,
+                        mape,
+                        stage,
+                        version,
+                    )
 
         except Exception as e:
             log.error("  ✗ %-10s %-14s error: %s", country, model_name, e)
@@ -228,13 +240,13 @@ def register_dl(dl_dir: str) -> None:
 
 def main() -> None:
     import argparse
+
     p = argparse.ArgumentParser(description="Register best models to MLflow Registry")
-    p.add_argument("--model_dir",   default="outputs/modeling",     help="Classical model dir")
-    p.add_argument("--pre_dir",     default="outputs/preprocessing", help="Preprocessing dir")
-    p.add_argument("--dl_dir",      default="outputs/deeplearning",  help="DL output dir")
-    p.add_argument("--output_dir",  default="outputs",               help="Root outputs dir")
-    p.add_argument("--dl-only",     action="store_true",             help="Register DL only")
-    p.add_argument("--classic-only",action="store_true",             help="Register classical only")
+    p.add_argument("--model_dir", default="outputs/modeling", help="Classical model dir")
+    p.add_argument("--pre_dir", default="outputs/preprocessing", help="Preprocessing dir")
+    p.add_argument("--dl_dir", default="outputs/deeplearning", help="DL output dir")
+    p.add_argument("--dl-only", action="store_true", help="Register DL only")
+    p.add_argument("--classic-only", action="store_true", help="Register classical only")
     args = p.parse_args()
 
     log.info("=" * 60)
@@ -243,21 +255,22 @@ def main() -> None:
     log.info("=" * 60)
 
     if not args.dl_only:
-        register_classical(args.model_dir, args.pre_dir, args.output_dir)
+        register_classical(args.model_dir, args.pre_dir)
 
     if not args.classic_only:
         register_dl(args.dl_dir)
 
-    # Summary
+    # Print summary
     try:
         from mlflow_config import registry_summary
+
         registry_summary()
     except Exception:
         pass
 
     log.info("=" * 60)
     log.info("  Registration complete.")
-    log.info("  View registry: http://localhost:5000/#/models")
+    log.info("  View: http://localhost:5000/#/models")
     log.info("=" * 60)
 
 

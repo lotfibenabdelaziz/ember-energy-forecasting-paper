@@ -93,7 +93,7 @@ class TestEDACLI:
 
     def test_eda_cli_runs(self, raw_csv, tmp_dir):
         result = subprocess.run(
-            [sys.executable, "src/01_eda.py", "--csv", raw_csv, "--output_dir", tmp_dir],
+            [sys.executable, "src/step01_eda.py", "--csv", raw_csv, "--output_dir", tmp_dir],
             capture_output=True,
             text=True,
         )
@@ -101,7 +101,7 @@ class TestEDACLI:
 
     def test_eda_outputs_exist(self, raw_csv, tmp_dir):
         subprocess.run(
-            [sys.executable, "src/01_eda.py", "--csv", raw_csv, "--output_dir", tmp_dir],
+            [sys.executable, "src/step01_eda.py", "--csv", raw_csv, "--output_dir", tmp_dir],
             capture_output=True,
         )
         assert os.path.exists(os.path.join(tmp_dir, "ember_filtered.csv"))
@@ -109,7 +109,7 @@ class TestEDACLI:
 
     def test_ember_filtered_has_all_countries(self, raw_csv, tmp_dir):
         subprocess.run(
-            [sys.executable, "src/01_eda.py", "--csv", raw_csv, "--output_dir", tmp_dir],
+            [sys.executable, "src/step01_eda.py", "--csv", raw_csv, "--output_dir", tmp_dir],
             capture_output=True,
         )
         path = os.path.join(tmp_dir, "ember_filtered.csv")

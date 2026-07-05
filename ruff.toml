@@ -36,6 +36,8 @@ ignore = [
     "N806",   # variable in function should be lowercase (ML conventions use X, y)
     "SIM108", # ternary operator (sometimes less readable)
     "RUF012", # mutable class attributes (dataclasses handle this)
+    "RUF001",
+    "RUF005",
 ]
 
 # Allow these in tests only

@@ -46,12 +46,13 @@ import yaml
 log = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-CACHE_DIR   = Path(".cache/pipeline")
-LOCK_FILE   = CACHE_DIR / "cache.json"
+CACHE_DIR = Path(".cache/pipeline")
+LOCK_FILE = CACHE_DIR / "cache.json"
 PARAMS_FILE = Path("params.yaml")
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class StepDefinition:
@@ -67,18 +68,18 @@ class StepDefinition:
     outputs : Files that must exist for cache to be considered valid
     """
 
-    name:    str
-    script:  str
-    deps:    list[str]  = field(default_factory=list)
-    params:  list[str]  = field(default_factory=list)
-    outputs: list[str]  = field(default_factory=list)
+    name: str
+    script: str
+    deps: list[str] = field(default_factory=list)
+    params: list[str] = field(default_factory=list)
+    outputs: list[str] = field(default_factory=list)
 
 
 @dataclass
 class CacheEntry:
     """A single cached step — stores the fingerprint hash."""
 
-    step:        str
+    step: str
     fingerprint: str
 
     def is_valid(self, current: str) -> bool:
@@ -86,6 +87,7 @@ class CacheEntry:
 
 
 # ── Hash helpers ──────────────────────────────────────────────────────────────
+
 
 def _hash_file(path: Path, chunk_size: int = 1 << 20) -> str:
     """SHA-256 of a single file — streamed for large CSVs."""
@@ -146,6 +148,7 @@ def _compute_fingerprint(step: StepDefinition) -> str:
 
 # ── Cache repository ──────────────────────────────────────────────────────────
 
+
 class StepCacheRepository:
     """
     Low-level JSON file repository for cache entries.
@@ -189,6 +192,7 @@ class StepCacheRepository:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+
 class StepCache:
     """
     High-level cache manager for pipeline steps.
@@ -230,7 +234,7 @@ class StepCache:
                 return False
 
         current = _compute_fingerprint(step)
-        entry   = self._repo.get(step.name)
+        entry = self._repo.get(step.name)
 
         if entry and entry.is_valid(current):
             log.debug("Cache HIT  (%s): %s", step.name, current[:12])
@@ -239,7 +243,9 @@ class StepCache:
         stored = entry.fingerprint[:12] if entry else "none"
         log.debug(
             "Cache MISS (%s): %s → %s",
-            step.name, stored, current[:12],
+            step.name,
+            stored,
+            current[:12],
         )
         return False
 

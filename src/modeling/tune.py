@@ -23,6 +23,7 @@ from src.modeling.features import prepare_xy
 
 try:
     import xgboost as xgb
+
     HAS_XGB = True
 except ImportError:
     HAS_XGB = False
@@ -48,9 +49,9 @@ def tune_hyperparameters(
     best_hp        : dict {model_name: {param: value}}
     good_features  : list[str] — cleaned feature list
     """
-    df_tune    = df[df["Year"] <= val_end].copy()
+    df_tune = df[df["Year"] <= val_end].copy()
     feat_check = df_tune[all_features].replace([np.inf, -np.inf], np.nan)
-    null_frac  = feat_check.isnull().mean()
+    null_frac = feat_check.isnull().mean()
     good_features = [c for c in all_features if null_frac[c] < 0.80]
 
     dropped = set(all_features) - set(good_features)
@@ -65,8 +66,11 @@ def tune_hyperparameters(
 
     # Ridge
     ridge_grid = GridSearchCV(
-        Ridge(), {"alpha": [0.01, 0.1, 1, 10, 100]},
-        cv=tscv, scoring="neg_mean_absolute_error", refit=True,
+        Ridge(),
+        {"alpha": [0.01, 0.1, 1, 10, 100]},
+        cv=tscv,
+        scoring="neg_mean_absolute_error",
+        refit=True,
     )
     ridge_grid.fit(X_tune, y_tune)
     best_ridge_alpha = ridge_grid.best_params_["alpha"]
@@ -76,7 +80,9 @@ def tune_hyperparameters(
     rf_grid = GridSearchCV(
         RandomForestRegressor(random_state=42, n_jobs=-1),
         {"n_estimators": [50, 100], "max_depth": [None, 5, 10]},
-        cv=tscv, scoring="neg_mean_absolute_error", refit=True,
+        cv=tscv,
+        scoring="neg_mean_absolute_error",
+        refit=True,
     )
     rf_grid.fit(X_tune, y_tune)
     best_rf_params = rf_grid.best_params_
@@ -88,7 +94,9 @@ def tune_hyperparameters(
         xgb_grid = GridSearchCV(
             xgb.XGBRegressor(verbosity=0, random_state=42, tree_method="hist"),
             {"n_estimators": [50, 100], "learning_rate": [0.05, 0.1], "max_depth": [3, 5]},
-            cv=tscv, scoring="neg_mean_absolute_error", refit=True,
+            cv=tscv,
+            scoring="neg_mean_absolute_error",
+            refit=True,
         )
         xgb_grid.fit(X_tune, y_tune)
         best_xgb_params = xgb_grid.best_params_
@@ -97,9 +105,9 @@ def tune_hyperparameters(
         log.warning("XGBoost not installed — skipping tuning")
 
     best_hp = {
-        "Ridge":        {"alpha": best_ridge_alpha},
+        "Ridge": {"alpha": best_ridge_alpha},
         "RandomForest": best_rf_params,
-        "XGBoost":      best_xgb_params,
+        "XGBoost": best_xgb_params,
     }
 
     with open(os.path.join(model_dir, "best_hp.json"), "w") as f:

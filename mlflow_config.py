@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import logging
 import os
-import platform
 from pathlib import Path
 
 import pandas as pd
@@ -33,17 +32,18 @@ log = logging.getLogger(__name__)
 # ── MLflow import (graceful degradation) ─────────────────────────────────────
 try:
     import mlflow
-    import mlflow.sklearn
-    import mlflow.pytorch
-    from mlflow.tracking import MlflowClient
     from mlflow.exceptions import MlflowException
+    import mlflow.pytorch
+    import mlflow.sklearn
+    from mlflow.tracking import MlflowClient
+
     MLFLOW_AVAILABLE = True
 except ImportError:
     MLFLOW_AVAILABLE = False
     log.warning("MLflow not installed — tracking disabled")
 
 EXPERIMENT_NAME = "ember-demand-forecasting"
-REGISTRY_NAME   = "ember-demand-model"   # base name; suffixed with country
+REGISTRY_NAME = "ember-demand-model"  # base name; suffixed with country
 
 # ── Timeout — fail fast when server unreachable ───────────────────────────────
 os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "5")
@@ -53,6 +53,7 @@ os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
 # ═══════════════════════════════════════════════════════════════════════════════
 # Tracking URI
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def _local_uri(path: Path | None = None) -> str:
     """
@@ -72,6 +73,7 @@ def get_tracking_uri() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Experiment setup
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def setup_experiment(name: str = EXPERIMENT_NAME) -> str | None:
     """
@@ -97,13 +99,14 @@ def setup_experiment(name: str = EXPERIMENT_NAME) -> str | None:
 # Classical model logging
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def log_classical_run(
-    country:         str,
-    model_name:      str,
-    params:          dict,
-    metrics:         dict,
+    country: str,
+    model_name: str,
+    params: dict,
+    metrics: dict,
     experiment_name: str = EXPERIMENT_NAME,
-    tags:            dict | None = None,
+    tags: dict | None = None,
 ) -> str | None:
     """
     Log one classical model walk-forward result to MLflow.
@@ -117,16 +120,16 @@ def log_classical_run(
         mlflow.set_experiment(experiment_name)
         run_name = f"{country}_{model_name}_classical"
         with mlflow.start_run(run_name=run_name) as run:
-            mlflow.set_tag("country",    country)
+            mlflow.set_tag("country", country)
             mlflow.set_tag("model_type", "classical")
             mlflow.set_tag("model_name", model_name)
             if tags:
                 for k, v in tags.items():
                     mlflow.set_tag(k, str(v))
             mlflow.log_params({k: str(v) for k, v in params.items()})
-            mlflow.log_metrics({k: round(float(v), 4)
-                                 for k, v in metrics.items()
-                                 if v is not None and v == v})  # skip NaN
+            mlflow.log_metrics(
+                {k: round(float(v), 4) for k, v in metrics.items() if v is not None and v == v}
+            )  # skip NaN
             return run.info.run_id
     except Exception as e:
         log.warning("MLflow classical logging failed (%s %s): %s", country, model_name, e)
@@ -134,8 +137,8 @@ def log_classical_run(
 
 
 def log_all_classical_to_mlflow(
-    test_metrics:    pd.DataFrame,
-    best_hp:         dict,
+    test_metrics: pd.DataFrame,
+    best_hp: dict,
     experiment_name: str = EXPERIMENT_NAME,
 ) -> None:
     """Log all classical benchmarking results — one run per (country, model)."""
@@ -143,15 +146,14 @@ def log_all_classical_to_mlflow(
         return
     for _, row in test_metrics.iterrows():
         model_name = row["Model"]
-        params     = best_hp.get(model_name, {})
-        metrics    = {k: row[k] for k in ["MAE", "RMSE", "MAPE"]
-                      if k in row and row[k] == row[k]}
+        params = best_hp.get(model_name, {})
+        metrics = {k: row[k] for k in ["MAE", "RMSE", "MAPE"] if k in row and row[k] == row[k]}
         log_classical_run(
-            country    = row["Country"],
-            model_name = model_name,
-            params     = params,
-            metrics    = metrics,
-            experiment_name = experiment_name,
+            country=row["Country"],
+            model_name=model_name,
+            params=params,
+            metrics=metrics,
+            experiment_name=experiment_name,
         )
 
 
@@ -159,9 +161,10 @@ def log_all_classical_to_mlflow(
 # Deep learning metrics logging
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def log_dl_model_metrics(
-    metrics_df:      pd.DataFrame,
-    params:          dict,
+    metrics_df: pd.DataFrame,
+    params: dict,
     experiment_name: str = EXPERIMENT_NAME,
 ) -> None:
     """Log all DL benchmarking results — one run per (country, model)."""
@@ -173,7 +176,7 @@ def log_dl_model_metrics(
         for _, row in metrics_df.iterrows():
             run_name = f"{row['Country']}_{row['Model']}_DL"
             with mlflow.start_run(run_name=run_name):
-                mlflow.set_tag("country",    row["Country"])
+                mlflow.set_tag("country", row["Country"])
                 mlflow.set_tag("model_type", "deep_learning")
                 mlflow.set_tag("model_name", row["Model"])
                 mlflow.log_params({k: str(v) for k, v in params.items()})
@@ -188,9 +191,10 @@ def log_dl_model_metrics(
 # params.yaml logging
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def log_params_from_yaml(
     yaml_path: str = "params.yaml",
-    prefix:    str = "",
+    prefix: str = "",
 ) -> None:
     """Log all params from params.yaml to the active MLflow run."""
     if not MLFLOW_AVAILABLE:
@@ -203,6 +207,7 @@ def log_params_from_yaml(
             params = yaml.safe_load(f) or {}
 
         flat: dict[str, str] = {}
+
         def _flatten(d: dict, parent: str = "") -> None:
             for k, v in d.items():
                 key = f"{parent}.{k}" if parent else k
@@ -225,6 +230,7 @@ def log_params_from_yaml(
 # MODEL REGISTRY
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def _registry_name(country: str, model_type: str = "classical") -> str:
     """
     Naming convention for registry:
@@ -235,10 +241,10 @@ def _registry_name(country: str, model_type: str = "classical") -> str:
 
 
 def register_best_model(
-    run_id:      str,
-    country:     str,
-    model_name:  str,
-    model_type:  str = "classical",
+    run_id: str,
+    country: str,
+    model_name: str,
+    model_type: str = "classical",
     artifact_path: str = "model",
 ) -> str | None:
     """
@@ -262,19 +268,19 @@ def register_best_model(
         return None
     try:
         mlflow.set_tracking_uri(get_tracking_uri())
-        client   = MlflowClient()
+        client = MlflowClient()
         reg_name = _registry_name(country, model_type)
 
         # Create registered model if it doesn't exist
         try:
             client.create_registered_model(
-                name        = reg_name,
-                description = (
+                name=reg_name,
+                description=(
                     f"Electricity demand forecast model for {country}. "
                     f"Type: {model_type}, Algorithm: {model_name}."
                 ),
-                tags = {
-                    "country":    country,
+                tags={
+                    "country": country,
                     "model_name": model_name,
                     "model_type": model_type,
                 },
@@ -286,11 +292,11 @@ def register_best_model(
         # Register new version
         model_uri = f"runs:/{run_id}/{artifact_path}"
         mv = client.create_model_version(
-            name        = reg_name,
-            source      = model_uri,
-            run_id      = run_id,
-            description = f"{model_name} trained for {country} — {model_type}",
-            tags        = {"algorithm": model_name, "country": country},
+            name=reg_name,
+            source=model_uri,
+            run_id=run_id,
+            description=f"{model_name} trained for {country} — {model_type}",
+            tags={"algorithm": model_name, "country": country},
         )
         log.info("Registered: %s v%s (run_id=%s)", reg_name, mv.version, run_id)
         return mv.version
@@ -301,10 +307,10 @@ def register_best_model(
 
 
 def promote_model(
-    country:     str,
-    version:     str,
-    stage:       str = "Staging",
-    model_type:  str = "classical",
+    country: str,
+    version: str,
+    stage: str = "Staging",
+    model_type: str = "classical",
     archive_existing: bool = True,
 ) -> bool:
     """
@@ -319,23 +325,25 @@ def promote_model(
         return False
     try:
         mlflow.set_tracking_uri(get_tracking_uri())
-        client   = MlflowClient()
+        client = MlflowClient()
         reg_name = _registry_name(country, model_type)
 
         if archive_existing:
-            existing = client.get_latest_versions(reg_name, stages=[stage])
+            existing = client.search_model_versions(
+                f"name='{reg_name}' and current_stage='{stage}'"
+            )
             for mv in existing:
                 client.transition_model_version_stage(
-                    name    = reg_name,
-                    version = mv.version,
-                    stage   = "Archived",
+                    name=reg_name,
+                    version=mv.version,
+                    stage="Archived",
                 )
                 log.info("Archived: %s v%s", reg_name, mv.version)
 
         client.transition_model_version_stage(
-            name    = reg_name,
-            version = version,
-            stage   = stage,
+            name=reg_name,
+            version=version,
+            stage=stage,
         )
         log.info("Promoted: %s v%s → %s", reg_name, version, stage)
         return True
@@ -346,12 +354,12 @@ def promote_model(
 
 
 def compare_and_promote(
-    country:      str,
-    new_run_id:   str,
-    new_mape:     float,
-    new_version:  str,
-    model_type:   str = "classical",
-    threshold:    float = 0.0,
+    country: str,
+    new_run_id: str,
+    new_mape: float,
+    new_version: str,
+    model_type: str = "classical",
+    threshold: float = 0.0,
 ) -> bool:
     """
     Auto-promote to Production if new model beats current Production MAPE.
@@ -369,24 +377,27 @@ def compare_and_promote(
         return False
     try:
         mlflow.set_tracking_uri(get_tracking_uri())
-        client   = MlflowClient()
+        client = MlflowClient()
         reg_name = _registry_name(country, model_type)
 
-        prod_versions = client.get_latest_versions(reg_name, stages=["Production"])
-
+        prod_versions = client.search_model_versions(
+            f"name='{reg_name}' and current_stage='Production'"
+        )
         if not prod_versions:
             # No production model yet — promote directly
             log.info("No Production model found for %s — promoting directly.", country)
             promote_model(country, new_version, "Production", model_type)
             return True
 
-        prod_mv   = prod_versions[0]
-        prod_run  = client.get_run(prod_mv.run_id)
+        prod_mv = prod_versions[0]
+        prod_run = client.get_run(prod_mv.run_id)
         prod_mape = prod_run.data.metrics.get("MAPE", float("inf"))
 
         log.info(
             "%s: new MAPE=%.2f%% vs Production MAPE=%.2f%%",
-            country, new_mape, prod_mape,
+            country,
+            new_mape,
+            prod_mape,
         )
 
         if new_mape < prod_mape - threshold:
@@ -404,7 +415,7 @@ def compare_and_promote(
 
 
 def get_production_model(
-    country:    str,
+    country: str,
     model_type: str = "classical",
 ):
     """
@@ -416,8 +427,8 @@ def get_production_model(
         return None
     try:
         mlflow.set_tracking_uri(get_tracking_uri())
-        reg_name  = _registry_name(country, model_type)
-        model_uri = f"models:/{reg_name}/Production"
+        reg_name = _registry_name(country, model_type)
+        model_uri = f"models:/{reg_name}@production"
 
         if model_type == "dl":
             model = mlflow.pytorch.load_model(model_uri)
@@ -444,34 +455,36 @@ def list_registered_models(model_type: str | None = None) -> pd.DataFrame:
     try:
         mlflow.set_tracking_uri(get_tracking_uri())
         client = MlflowClient()
-        rows   = []
+        rows = []
 
         for rm in client.search_registered_models():
             if model_type and model_type not in rm.name:
                 continue
-            for mv in client.get_latest_versions(rm.name):
+            for mv in client.search_model_versions(f"name='{rm.name}'"):
                 try:
-                    run    = client.get_run(mv.run_id)
-                    mape   = run.data.metrics.get("MAPE", None)
-                    ctry   = run.data.tags.get("country", "unknown")
-                    mtype  = run.data.tags.get("model_type", "unknown")
-                    mname  = run.data.tags.get("model_name", "unknown")
+                    run = client.get_run(mv.run_id)
+                    mape = run.data.metrics.get("MAPE", None)
+                    ctry = run.data.tags.get("country", "unknown")
+                    mtype = run.data.tags.get("model_type", "unknown")
+                    mname = run.data.tags.get("model_name", "unknown")
                 except Exception:
-                    mape  = None
-                    ctry  = rm.tags.get("country", "unknown")
+                    mape = None
+                    ctry = rm.tags.get("country", "unknown")
                     mtype = rm.tags.get("model_type", "unknown")
                     mname = mv.tags.get("algorithm", "unknown")
 
-                rows.append({
-                    "registered_name": rm.name,
-                    "country":         ctry,
-                    "model_type":      mtype,
-                    "algorithm":       mname,
-                    "version":         mv.version,
-                    "stage":           mv.current_stage,
-                    "MAPE":            round(mape, 3) if mape else None,
-                    "run_id":          mv.run_id[:8],
-                })
+                rows.append(
+                    {
+                        "registered_name": rm.name,
+                        "country": ctry,
+                        "model_type": mtype,
+                        "algorithm": mname,
+                        "version": mv.version,
+                        "stage": mv.current_stage,
+                        "MAPE": round(mape, 3) if mape else None,
+                        "run_id": mv.run_id[:8],
+                    }
+                )
 
         df = pd.DataFrame(rows)
         if not df.empty:

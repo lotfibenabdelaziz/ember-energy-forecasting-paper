@@ -31,11 +31,13 @@ def agg_metrics(df_r: pd.DataFrame) -> pd.DataFrame:
     """Aggregate MAE/RMSE/MAPE per Country x Model."""
     rows = []
     for (country, model), g in df_r.groupby(["Country", "Model"]):
-        rows.append({
-            "Country": country,
-            "Model":   model,
-            "MAE":     mean_absolute_error(g["y_actual"], g["y_pred"]),
-            "RMSE":    rmse(g["y_actual"], g["y_pred"]),
-            "MAPE":    mape(g["y_actual"], g["y_pred"]),
-        })
+        rows.append(
+            {
+                "Country": country,
+                "Model": model,
+                "MAE": mean_absolute_error(g["y_actual"], g["y_pred"]),
+                "RMSE": rmse(g["y_actual"], g["y_pred"]),
+                "MAPE": mape(g["y_actual"], g["y_pred"]),
+            }
+        )
     return pd.DataFrame(rows)

@@ -24,16 +24,17 @@ log = logging.getLogger(__name__)
 
 # ── Recursive multi-year forecast ─────────────────────────────────────────────
 
+
 def recursive_forecast(
     model,
-    df_country:    pd.DataFrame,
-    feature_cols:  list[str],
-    target:        str,
-    seq_len:       int,
+    df_country: pd.DataFrame,
+    feature_cols: list[str],
+    target: str,
+    seq_len: int,
     scaler_X,
     scaler_y,
     forecast_years: list[int],
-    device:        torch.device,
+    device: torch.device,
 ) -> pd.DataFrame:
     """
     Recursively forecast `forecast_years` ahead.
@@ -58,7 +59,7 @@ def recursive_forecast(
 
     for year in forecast_years:
         window_raw = clean_arr(history.tail(seq_len)[feature_cols].values)
-        window_sc  = scaler_X.transform(window_raw)
+        window_sc = scaler_X.transform(window_raw)
 
         with torch.no_grad():
             x = torch.tensor(window_sc, dtype=torch.float32).unsqueeze(0).to(device)
@@ -70,8 +71,8 @@ def recursive_forecast(
         # Build next row: carry forward last known feature values,
         # update Demand with the new prediction
         new_row = history.iloc[-1].copy()
-        new_row["Year"]   = year
-        new_row[target]   = y_pred
+        new_row["Year"] = year
+        new_row[target] = y_pred
         history = pd.concat([history, new_row.to_frame().T], ignore_index=True)
 
     return pd.DataFrame(predictions)
@@ -79,13 +80,13 @@ def recursive_forecast(
 
 def recursive_forecast_all_countries(
     model_registry_fitted: dict,
-    df:             pd.DataFrame,
-    countries:      list[str],
-    feature_cols:   list[str],
-    target:         str,
-    seq_len:        int,
+    df: pd.DataFrame,
+    countries: list[str],
+    feature_cols: list[str],
+    target: str,
+    seq_len: int,
     forecast_years: list[int],
-    device:         torch.device,
+    device: torch.device,
 ) -> pd.DataFrame:
     """
     Run recursive_forecast() for each (country, best_model) pair.
@@ -103,40 +104,46 @@ def recursive_forecast_all_countries(
             continue
 
         entry = model_registry_fitted[country]
-        sub   = df[df["Area"] == country]
+        sub = df[df["Area"] == country]
 
         fc = recursive_forecast(
-            entry["model"], sub, feature_cols, target, seq_len,
-            entry["scaler_X"], entry["scaler_y"], forecast_years, device,
+            entry["model"],
+            sub,
+            feature_cols,
+            target,
+            seq_len,
+            entry["scaler_X"],
+            entry["scaler_y"],
+            forecast_years,
+            device,
         )
         fc["Country"] = country
-        fc["Model"]   = entry["name"]
+        fc["Model"] = entry["name"]
         all_forecasts.append(fc)
 
     if not all_forecasts:
         return pd.DataFrame(columns=["Country", "Model", "Year", "Forecast"])
 
-    return pd.concat(all_forecasts, ignore_index=True)[
-        ["Country", "Model", "Year", "Forecast"]
-    ]
+    return pd.concat(all_forecasts, ignore_index=True)[["Country", "Model", "Year", "Forecast"]]
 
 
 # ── Bootstrap confidence intervals ────────────────────────────────────────────
 
+
 def bootstrap_ci(
     model,
-    df_country:    pd.DataFrame,
-    feature_cols:  list[str],
-    target:        str,
-    seq_len:       int,
+    df_country: pd.DataFrame,
+    feature_cols: list[str],
+    target: str,
+    seq_len: int,
     scaler_X,
     scaler_y,
     forecast_years: list[int],
-    device:        torch.device,
-    residuals:     np.ndarray,
-    n_boot:        int = 200,
-    ci:            float = 0.90,
-    seed:          int = 42,
+    device: torch.device,
+    residuals: np.ndarray,
+    n_boot: int = 200,
+    ci: float = 0.90,
+    seed: int = 42,
 ) -> pd.DataFrame:
     """
     Residual-bootstrap confidence intervals around the point forecast.
@@ -157,8 +164,15 @@ def bootstrap_ci(
 
     # Point forecast (no noise)
     point_fc = recursive_forecast(
-        model, df_country, feature_cols, target, seq_len,
-        scaler_X, scaler_y, forecast_years, device,
+        model,
+        df_country,
+        feature_cols,
+        target,
+        seq_len,
+        scaler_X,
+        scaler_y,
+        forecast_years,
+        device,
     )
 
     if len(residuals) == 0:
@@ -193,18 +207,17 @@ def compute_residuals(walk_forward_results: list[dict]) -> np.ndarray:
     """Extract (actual - predicted) residuals from walk-forward test results."""
     if not walk_forward_results:
         return np.array([])
-    return np.array([
-        r["y_actual"] - r["y_pred"] for r in walk_forward_results
-    ])
+    return np.array([r["y_actual"] - r["y_pred"] for r in walk_forward_results])
 
 
 # ── Growth summary ─────────────────────────────────────────────────────────────
 
+
 def growth_summary(
     df_forecast: pd.DataFrame,
-    df_hist:     pd.DataFrame,
-    countries:   list[str],
-    base_year:   int = 2024,
+    df_hist: pd.DataFrame,
+    countries: list[str],
+    base_year: int = 2024,
     target_year: int = 2030,
 ) -> pd.DataFrame:
     """
@@ -223,9 +236,7 @@ def growth_summary(
     n_years = target_year - base_year
 
     for country in countries:
-        hist_val = df_hist[
-            (df_hist["Area"] == country) & (df_hist["Year"] == base_year)
-        ]["Demand"]
+        hist_val = df_hist[(df_hist["Area"] == country) & (df_hist["Year"] == base_year)]["Demand"]
         if hist_val.empty:
             continue
         base_val = float(hist_val.values[0])
@@ -245,13 +256,15 @@ def growth_summary(
             else float("nan")
         )
 
-        rows.append({
-            "Country":              country,
-            "Model":                model_name,
-            f"{base_year}_TWh":     round(base_val, 2),
-            f"{target_year}_TWh":   round(target_val, 2),
-            "Total_Growth_%":       round(total_growth, 2),
-            "CAGR_%":               round(cagr, 2),
-        })
+        rows.append(
+            {
+                "Country": country,
+                "Model": model_name,
+                f"{base_year}_TWh": round(base_val, 2),
+                f"{target_year}_TWh": round(target_val, 2),
+                "Total_Growth_%": round(total_growth, 2),
+                "CAGR_%": round(cagr, 2),
+            }
+        )
 
     return pd.DataFrame(rows)
