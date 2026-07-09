@@ -580,7 +580,7 @@ def plot_forecast_per_country(
         frow = fc_df[fc_df["Country"] == country]
         model = frow["Model"].values[0]
 
-        tr = hist[hist["Year"] <= 2016]
+        tr = hist[hist["Year"] <= 2024]
         va = hist[(hist["Year"] > 2016) & (hist["Year"] <= 2020)]
         te = hist[hist["Year"] > 2020]
 
@@ -610,7 +610,7 @@ def plot_forecast_per_country(
             frow["Year"], frow["Lower_90"], frow["Upper_90"], alpha=0.18, color=col, label="90% CI"
         )
 
-        ax.axvspan(2016.5, 2020.5, alpha=0.05, color="orange")
+        ax.axvspan(2024.5, 2020.5, alpha=0.05, color="orange")
         ax.axvspan(2020.5, 2024.5, alpha=0.05, color="red")
         ax.axvline(2024, color="grey", ls=":", lw=1)
 

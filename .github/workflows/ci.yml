@@ -156,7 +156,7 @@ jobs:
           pip install --retries 5 --timeout 120 \
             torch --index-url https://download.pytorch.org/whl/cpu
           pip install --retries 5 --timeout 120 \
-            scikit-learn numpy pandas pytest pytest-timeout
+            scikit-learn numpy pandas mlflow pytest pytest-timeout
 
       - name: Run DL tests (unit only — no CLI integration)
         run: |

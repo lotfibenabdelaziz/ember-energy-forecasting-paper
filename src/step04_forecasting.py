@@ -33,6 +33,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from src.config import cfg
 from src.forecasting.forecasters import (
     bootstrap_forecast_ci,
     get_ml_cls_map,
@@ -53,8 +54,8 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
-TARGET = "Demand"
+COUNTRIES = cfg.countries
+TARGET = cfg.target
 
 STAT_MODELS = {"Naive", "Naïve", "LinearTrend", "Holt", "ARIMA(1,1,1)", "ARIMA_1_1_1"}
 
@@ -105,6 +106,24 @@ def generate_all_forecasts(
                 target,
                 ml_cls_map,
             )
+
+            # ── Sanity check — fallback if first-year jump > 25% ─────────────
+            last_known  = float(hist_df[target].values[-1])
+            deviation   = abs(fc[0] - last_known) / max(abs(last_known), 1e-6)
+            if deviation > 0.25:
+                log.warning(
+                    "  %s: %s forecast deviates %.1f%% from last known (%.1f→%.1f TWh)"
+                    " — switching to LinearTrend fallback",
+                    country, best_model, deviation * 100, last_known, fc[0],
+                )
+                from src.forecasting.forecasters import forecast_statistical
+                ts       = hist_df[target].values.astype(float)
+                fc       = forecast_statistical(ts, "LinearTrend", horizon)
+                std      = np.std(ts[-8:]) * 0.10
+                lo       = fc - 1.645 * std
+                hi       = fc + 1.645 * std
+                used_model = f"LinearTrend (fallback from {best_model})"
+
         except Exception as e1:
             log.warning("    Best model failed: %s: %s", type(e1).__name__, e1)
             log.info("    Trying Holt fallback...")
@@ -162,7 +181,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pre_dir", default="outputs/preprocessing", help="Preprocessing dir")
     p.add_argument("--model_dir", default="outputs/modeling", help="Modeling dir")
     p.add_argument("--output_dir", default="outputs/forecasting", help="Output dir")
-    p.add_argument("--forecast_until", type=int, default=2030, help="Last forecast year")
+    p.add_argument("--forecast_until", type=int, default=cfg.forecast_end, help="Last forecast year")
     return p.parse_args()
 
 
@@ -172,7 +191,7 @@ def main() -> None:
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(fig_dir, exist_ok=True)
 
-    forecast_years = list(range(2025, args.forecast_until + 1))
+    forecast_years = list(range(cfg.forecast_start, args.forecast_until + 1))
 
     # Load
     df = pd.read_csv(os.path.join(args.pre_dir, "ember_model_ready.csv"))
@@ -181,8 +200,28 @@ def main() -> None:
         meta = json.load(f)
 
     all_features = meta["all_features"]
-    # Fallback: raw_features may be missing from stale feature_meta.json
-    # Re-run: python pipeline.py --invalidate preprocessing
+
+    # For the FINAL refit (used for 2025-2030 forecast only):
+    # Add Demand lag/MA cols — excluded from walk-forward training to prevent
+    # leakage, but valid for final refit since we train on ALL history
+    # and predict genuinely unknown future years.
+    demand_lag_cols = [
+        f"{TARGET}_lag1", f"{TARGET}_lag2", f"{TARGET}_lag3",
+        f"{TARGET}_ma3",  f"{TARGET}_ma5",
+    ]
+    forecast_features = [
+        c for c in df.columns
+        if c not in ["Area", "Year"]
+        and c != TARGET
+    ]
+    log.info(
+        "Walk-forward features: %d | Final refit features: %d",
+        len(all_features), len(forecast_features),
+    )
+    train_end    = meta.get("TRAIN_END", cfg.train_end)
+    val_end      = meta.get("VAL_END",   cfg.val_end)
+    test_end     = meta.get("TEST_END",  cfg.test_end)
+
     raw_features = meta.get("raw_features", meta.get("FEATURES", []))
 
     log.info("Data: %s", df.shape)
@@ -226,7 +265,7 @@ def main() -> None:
     fc_df, _model_used = generate_all_forecasts(
         df,
         best_df,
-        all_features,
+        forecast_features,   # includes Demand_lag1/2/3 for recursive step
         raw_features,
         forecast_years,
         TARGET,
@@ -236,7 +275,8 @@ def main() -> None:
     log.info("Forecast table: %s", fc_df.shape)
 
     # Plots
-    plot_forecast_per_country(df, fc_df, TARGET, fig_dir)
+    plot_forecast_per_country(df, fc_df, TARGET, fig_dir,
+        train_end=train_end, val_end=val_end, test_end=test_end)
     plot_forecast_overlay(df, fc_df, TARGET, fig_dir)
 
     # Growth summary
@@ -246,7 +286,7 @@ def main() -> None:
     plot_growth_uncertainty(fc_df, growth_df, fig_dir)
 
     # Export
-    fc_df.to_csv(os.path.join(args.output_dir, "demand_forecast_2025_2030.csv"), index=False)
+    fc_df.to_csv(os.path.join(args.output_dir, f"demand_forecast_{cfg.forecast_start}_{cfg.forecast_end}.csv"), index=False)
     growth_df.to_csv(os.path.join(args.output_dir, "demand_growth_summary.csv"), index=False)
 
     log.info("=== Forecasting Complete ===")

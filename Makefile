@@ -35,7 +35,7 @@ FULL_IMAGE   = $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 
 # ── Pipeline config ───────────────────────────────────────────────────────────
 CSV_PATH       ?= ./data/raw/yearly_full_release_long_format.csv
-TRAIN_UNTIL    ?= 2016
+TRAIN_UNTIL    ?= 2024
 FORECAST_UNTIL ?= 2030
 NAMESPACE      ?= ember-pipeline
 MLFLOW_PORT    ?= 5000

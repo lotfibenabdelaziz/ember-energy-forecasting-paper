@@ -1,0 +1,43 @@
+Country,Year,Forecast,Lower_90,Upper_90,Model
+Tunisia,2025,22.77,16.84,31.35,Ridge
+Tunisia,2026,22.63,15.22,32.65,Ridge
+Tunisia,2027,23.34,16.11,32.9,Ridge
+Tunisia,2028,23.8,16.63,33.6,Ridge
+Tunisia,2029,24.2,16.84,34.26,Ridge
+Tunisia,2030,24.65,17.19,34.83,Ridge
+Austria,2025,71.41,70.79,73.34,RandomForest
+Austria,2026,70.94,70.43,73.28,RandomForest
+Austria,2027,71.11,70.82,73.39,RandomForest
+Austria,2028,71.04,70.72,73.48,RandomForest
+Austria,2029,71.05,70.81,73.48,RandomForest
+Austria,2030,71.05,70.83,73.49,RandomForest
+Germany,2025,417.88,417.88,602.11,Ridge
+Germany,2026,368.01,331.54,559.68,Ridge
+Germany,2027,359.09,314.4,554.11,Ridge
+Germany,2028,355.41,289.05,561.81,Ridge
+Germany,2029,349.43,268.34,550.33,Ridge
+Germany,2030,342.52,258.32,547.46,Ridge
+Egypt,2025,242.56,237.66,247.53,ARIMA_1_1_1
+Egypt,2026,249.32,244.09,254.52,ARIMA_1_1_1
+Egypt,2027,256.09,250.33,261.55,ARIMA_1_1_1
+Egypt,2028,262.85,256.71,268.56,ARIMA_1_1_1
+Egypt,2029,269.62,263.08,275.56,ARIMA_1_1_1
+Egypt,2030,276.38,269.45,282.56,ARIMA_1_1_1
+Canada,2025,616.26,614.65,619.3,LinearTrend
+Canada,2026,617.61,615.84,620.81,LinearTrend
+Canada,2027,618.97,617.01,622.27,LinearTrend
+Canada,2028,620.32,618.15,623.76,LinearTrend
+Canada,2029,621.67,619.35,625.32,LinearTrend
+Canada,2030,623.02,620.58,626.88,LinearTrend
+France,2025,490.89,487.79,493.98,LinearTrend (fallback from Ridge)
+France,2026,489.69,486.6,492.79,LinearTrend (fallback from Ridge)
+France,2027,488.5,485.4,491.6,LinearTrend (fallback from Ridge)
+France,2028,487.31,484.21,490.41,LinearTrend (fallback from Ridge)
+France,2029,486.12,483.02,489.22,LinearTrend (fallback from Ridge)
+France,2030,484.93,481.83,488.02,LinearTrend (fallback from Ridge)
+Kuwait,2025,89.56,88.73,90.3,LinearTrend
+Kuwait,2026,91.82,90.94,92.62,LinearTrend
+Kuwait,2027,94.08,93.15,94.94,LinearTrend
+Kuwait,2028,96.34,95.37,97.26,LinearTrend
+Kuwait,2029,98.6,97.57,99.58,LinearTrend
+Kuwait,2030,100.87,99.78,101.9,LinearTrend

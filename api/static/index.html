@@ -15,6 +15,7 @@
 
   <!-- Chart.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/3.0.1/chartjs-plugin-annotation.min.js"></script>
 
   <style>
     /* ── Reset & base ─────────────────────────────────────────── */
@@ -645,10 +646,15 @@
       Sign in →
     </button>
 
-    <div class="login-footer">
-      Protected by JWT · Token expires in
-      <span id="expire-label">60 min</span>
-    </div>
+      <!-- AFTER -->
+  <div class="login-footer">
+    ⚡ Ember Energy Forecasting &nbsp;·&nbsp; 🌍 7 Nations &nbsp;·&nbsp; 📊 2025–2030
+    <br>
+    <span style="opacity:.5;font-size:10px;display:block;margin-top:4px">
+      <span id="expire-label" style="display:none"></span>
+      Annual electricity demand forecast · IEEE Research Paper
+    </span>
+  </div>
   </div>
 </div>
 
@@ -786,14 +792,17 @@
 
       <div class="section">
         <div class="section-head">
-          <span class="section-title">Demand forecast 2025–2030</span>
-          <span class="section-hint">Classical · DL · 90% CI</span>
+          <span class="section-title">Demand history & forecast 2000–2030</span>
+          <span class="section-hint">Actual · Classical · DL · Events</span>
         </div>
         <div class="chart-card">
           <div class="chart-legend">
+            <div class="leg-item"><div class="leg-dot" style="background:#6b7280"></div>Historical</div>
             <div class="leg-item"><div class="leg-dot" style="background:#3b9eff"></div>Classical</div>
             <div class="leg-item"><div class="leg-dot" style="background:#00d4a0"></div>Deep learning</div>
             <div class="leg-item"><div class="leg-dot" style="background:rgba(59,158,255,.25);width:18px"></div>90% CI</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#e63946;border-radius:2px;width:3px;height:14px"></div>COVID-19</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#ff9f1c;border-radius:2px;width:3px;height:14px"></div>Ukraine war</div>
           </div>
           <div class="chart-wrap">
             <canvas id="ovForecastChart" role="img" aria-label="Demand forecast line chart 2025 to 2030">Loading…</canvas>
@@ -969,6 +978,7 @@
   /* ── Config ──────────────────────────────────────────────────── */
   const API_BASE  = 'http://localhost:8000';
   const YEARS     = [2025,2026,2027,2028,2029,2030];
+  const HIST_YEARS = Array.from({length:25}, (_,i) => 2000+i);
   const TOKEN_KEY  = 'ember_jwt';
   const USER_KEY   = 'ember_user';
   const EXPIRE_KEY = 'ember_expire';
@@ -1248,40 +1258,91 @@
       document.getElementById('s-dlmodel').textContent = bm.dl_model ?? '—';
       document.getElementById('s-dlmape').textContent  = 'MAPE ' + (bm.dl_mape ? fmt(bm.dl_mape,2)+'%' : '—');
 
-      /* chart */
+      /* full 2000-2030 chart */
+      let hist = { years:[], demand_twh:[], events:[] };
       let dlFc = { forecast_twh: Array(6).fill(null) };
+      try { hist = await apiFetch('/history/'+c); } catch(_){}
       try { dlFc = await apiFetch('/forecast/dl/'+c); } catch(_){}
+
+      /* merge all years into one timeline */
+      const allYears = [...hist.years, ...YEARS];
+      const histData = [...hist.demand_twh, ...Array(6).fill(null)];
+      const clsData  = [...Array(hist.years.length).fill(null), ...fc.forecast_twh];
+      const dlData   = [...Array(hist.years.length).fill(null), ...dlFc.forecast_twh];
+      const upData   = fc.upper_90 ? [...Array(hist.years.length).fill(null), ...fc.upper_90] : null;
+      const loData   = fc.lower_90 ? [...Array(hist.years.length).fill(null), ...fc.lower_90] : null;
+
+      /* event annotation lines */
+      const events = hist.events || [];
+      const eventAnnotations = {};
+      events.forEach((ev, i) => {
+        const xIdx = allYears.indexOf(ev.year);
+        if (xIdx < 0) return;
+        eventAnnotations['ev'+i] = {
+          type: 'line', scaleID: 'x', value: xIdx,
+          borderColor: ev.color, borderWidth: 1.5,
+          borderDash: [4, 3],
+          label: {
+            display: true, content: ev.label,
+            font: { size: 9, family: "'DM Mono', monospace" },
+            color: ev.color,
+            backgroundColor: 'rgba(10,12,16,.85)',
+            position: 'start', yAdjust: -6,
+            padding: { x: 6, y: 3 }, borderRadius: 4,
+          }
+        };
+      });
 
       destroyChart('ovForecast');
       charts['ovForecast'] = new Chart(
         document.getElementById('ovForecastChart'), {
         data: {
-          labels: YEARS,
+          labels: allYears,
           datasets: [
-            { type:'line', label:'Classical', data: fc.forecast_twh,
+            { type:'line', label:'Historical', data: histData,
+              borderColor:'#6b7280', backgroundColor:'rgba(107,114,128,.06)',
+              borderWidth:2, pointRadius:2, tension:.35, fill:true,
+              spanGaps:false },
+            { type:'line', label:'Classical', data: clsData,
               borderColor:'#3b9eff', backgroundColor:'rgba(59,158,255,.08)',
-              borderWidth:2, pointRadius:4, tension:.35, fill:false },
-            { type:'line', label:'DL', data: dlFc.forecast_twh,
+              borderWidth:2.5, pointRadius:4, tension:.35, fill:false,
+              spanGaps:false },
+            { type:'line', label:'DL', data: dlData,
               borderColor:'#00d4a0', backgroundColor:'rgba(0,212,160,.06)',
-              borderWidth:2, pointRadius:4, tension:.35, fill:false, borderDash:[5,3] },
-            ...(fc.upper_90 ? [
-              { type:'line', label:'Upper', data: fc.upper_90,
-                borderColor:'rgba(59,158,255,.15)', backgroundColor:'rgba(59,158,255,.07)',
-                borderWidth:1, pointRadius:0, tension:.35, fill:'+1' },
-              { type:'line', label:'Lower', data: fc.lower_90,
-                borderColor:'rgba(59,158,255,.15)', backgroundColor:'transparent',
-                borderWidth:1, pointRadius:0, tension:.35, fill:false }
+              borderWidth:2, pointRadius:4, tension:.35, fill:false,
+              borderDash:[5,3], spanGaps:false },
+            ...(upData ? [
+              { type:'line', label:'Upper 90%', data: upData,
+                borderColor:'rgba(59,158,255,.18)', backgroundColor:'rgba(59,158,255,.07)',
+                borderWidth:1, pointRadius:0, tension:.35, fill:'+1', spanGaps:false },
+              { type:'line', label:'Lower 90%', data: loData,
+                borderColor:'rgba(59,158,255,.18)', backgroundColor:'transparent',
+                borderWidth:1, pointRadius:0, tension:.35, fill:false, spanGaps:false }
             ] : [])
           ]
         },
         options: {
           responsive:true, maintainAspectRatio:false,
-          plugins:{ legend:{display:false} },
+          plugins:{
+            legend:{ display:false },
+            annotation: Object.keys(eventAnnotations).length ? { annotations: eventAnnotations } : undefined,
+            tooltip:{
+              mode:'index', intersect:false,
+              callbacks:{ label: ctx => ctx.dataset.label+': '+
+                (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(1)+' TWh' : '—') }
+            }
+          },
           scales:{
-            x:{ grid:{color:'rgba(255,255,255,.04)'}, ticks:{font:{size:11}} },
-            y:{ grid:{color:'rgba(255,255,255,.04)'}, ticks:{font:{size:11},
-              callback: v => v >= 1000 ? (v/1000).toFixed(1)+'k' : v.toFixed(1) }}
-          }
+            x:{
+              grid:{color:'rgba(255,255,255,.04)'},
+              ticks:{ font:{size:10}, maxTicksLimit:16, maxRotation:0,
+                callback: (val,i) => allYears[i] % 5 === 0 ? allYears[i] : '' }
+            },
+            y:{ grid:{color:'rgba(255,255,255,.04)'},
+              ticks:{ font:{size:11},
+                callback: v => v >= 1000 ? (v/1000).toFixed(1)+'k' : v.toFixed(1) }}
+          },
+          interaction:{ mode:'nearest', axis:'x', intersect:false }
         }
       });
 
@@ -1304,37 +1365,97 @@
       document.getElementById('fc-cmodel').textContent = fc.model ?? '—';
       document.getElementById('fc-dlmodel').textContent = dlFc.model ?? '—';
 
-      /* classical chart */
+      /* fetch history for full 2000-2030 charts */
+      let hist = { years:[], demand_twh:[], events:[] };
+      try { hist = await apiFetch('/history/'+c); } catch(_){}
+
+      const allYrs   = [...hist.years, ...YEARS];
+      const histData = [...hist.demand_twh, ...Array(YEARS.length).fill(null)];
+      const evts     = hist.events || [];
+
+      function makeEventAnnotations(years) {
+        const obj = {};
+        evts.forEach((ev, i) => {
+          const xi = years.indexOf(ev.year);
+          if (xi < 0) return;
+          obj['ev'+i] = {
+            type:'line', scaleID:'x', value: xi,
+            borderColor: ev.color, borderWidth:1.5, borderDash:[4,3],
+            label:{ display:true, content: ev.label,
+              font:{size:9, family:"'DM Mono', monospace"},
+              color: ev.color, backgroundColor:'rgba(10,12,16,.85)',
+              position:'start', yAdjust:-6,
+              padding:{x:6,y:3}, borderRadius:4 }
+          };
+        });
+        return obj;
+      }
+
+      /* ── classical chart — full 2000-2030 ── */
+      const clsData = [...Array(hist.years.length).fill(null), ...fc.forecast_twh];
+      const upData  = fc.upper_90 ? [...Array(hist.years.length).fill(null), ...fc.upper_90] : null;
+      const loData  = fc.lower_90 ? [...Array(hist.years.length).fill(null), ...fc.lower_90] : null;
+
       destroyChart('fcClassic');
       charts['fcClassic'] = new Chart(document.getElementById('fcClassicChart'), {
         type:'line',
-        data:{ labels:YEARS, datasets:[{
-          label:'Classical', data:fc.forecast_twh,
-          borderColor:'#3b9eff', backgroundColor:'rgba(59,158,255,.1)',
-          borderWidth:2, pointRadius:5, tension:.35, fill:true,
-          ...(fc.upper_90 ? {} : {})
-        }] },
+        data:{ labels: allYrs, datasets:[
+          { label:'Historical', data: histData,
+            borderColor:'#6b7280', backgroundColor:'rgba(107,114,128,.08)',
+            borderWidth:2, pointRadius:2, tension:.35, fill:true, spanGaps:false },
+          { label:'Classical', data: clsData,
+            borderColor:'#3b9eff', backgroundColor:'rgba(59,158,255,.12)',
+            borderWidth:2.5, pointRadius:5, tension:.35, fill:true, spanGaps:false },
+          ...(upData ? [
+            { label:'Upper', data: upData,
+              borderColor:'rgba(59,158,255,.2)', backgroundColor:'rgba(59,158,255,.08)',
+              borderWidth:1, pointRadius:0, tension:.35, fill:'+1', spanGaps:false },
+            { label:'Lower', data: loData,
+              borderColor:'rgba(59,158,255,.2)', backgroundColor:'transparent',
+              borderWidth:1, pointRadius:0, tension:.35, fill:false, spanGaps:false }
+          ] : [])
+        ]},
         options:{ responsive:true, maintainAspectRatio:false,
-          plugins:{legend:{display:false}},
-          scales:{ x:{grid:{color:'rgba(255,255,255,.04)'}},
-                   y:{grid:{color:'rgba(255,255,255,.04)'},
-                      ticks:{callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(1)}} } }
+          plugins:{ legend:{display:false},
+            annotation:{ annotations: makeEventAnnotations(allYrs) },
+            tooltip:{ mode:'index', intersect:false,
+              callbacks:{ label: ctx => ctx.dataset.label+': '+
+                (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(1)+' TWh' : '—') }}},
+          scales:{
+            x:{ grid:{color:'rgba(255,255,255,.04)'},
+              ticks:{font:{size:10}, maxTicksLimit:16, maxRotation:0,
+                callback:(val,i)=> allYrs[i]%5===0 ? allYrs[i] : ''} },
+            y:{ grid:{color:'rgba(255,255,255,.04)'},
+              ticks:{callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(1)}} },
+          interaction:{mode:'nearest',axis:'x',intersect:false} }
       });
 
-      /* DL chart */
+      /* ── DL chart — full 2000-2030 ── */
+      const dlData2 = [...Array(hist.years.length).fill(null), ...dlFc.forecast_twh];
       destroyChart('fcDL');
       charts['fcDL'] = new Chart(document.getElementById('fcDLChart'), {
         type:'line',
-        data:{ labels:YEARS, datasets:[{
-          label:'Deep Learning', data:dlFc.forecast_twh,
-          borderColor:'#00d4a0', backgroundColor:'rgba(0,212,160,.1)',
-          borderWidth:2, pointRadius:5, tension:.35, fill:true
-        }] },
+        data:{ labels: allYrs, datasets:[
+          { label:'Historical', data: histData,
+            borderColor:'#6b7280', backgroundColor:'rgba(107,114,128,.08)',
+            borderWidth:2, pointRadius:2, tension:.35, fill:true, spanGaps:false },
+          { label:'Deep Learning', data: dlData2,
+            borderColor:'#00d4a0', backgroundColor:'rgba(0,212,160,.12)',
+            borderWidth:2.5, pointRadius:5, tension:.35, fill:true, spanGaps:false }
+        ]},
         options:{ responsive:true, maintainAspectRatio:false,
-          plugins:{legend:{display:false}},
-          scales:{ x:{grid:{color:'rgba(255,255,255,.04)'}},
-                   y:{grid:{color:'rgba(255,255,255,.04)'},
-                      ticks:{callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(1)}} } }
+          plugins:{ legend:{display:false},
+            annotation:{ annotations: makeEventAnnotations(allYrs) },
+            tooltip:{ mode:'index', intersect:false,
+              callbacks:{ label: ctx => ctx.dataset.label+': '+
+                (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(1)+' TWh' : '—') }}},
+          scales:{
+            x:{ grid:{color:'rgba(255,255,255,.04)'},
+              ticks:{font:{size:10}, maxTicksLimit:16, maxRotation:0,
+                callback:(val,i)=> allYrs[i]%5===0 ? allYrs[i] : ''} },
+            y:{ grid:{color:'rgba(255,255,255,.04)'},
+              ticks:{callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(1)}} },
+          interaction:{mode:'nearest',axis:'x',intersect:false} }
       });
 
       /* table */

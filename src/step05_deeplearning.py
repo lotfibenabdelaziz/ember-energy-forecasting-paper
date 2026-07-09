@@ -35,23 +35,26 @@ import numpy as np
 import pandas as pd
 import torch
 
+from src.config import cfg
 from src.dataset import (
-    BATCH_SIZE,
-    COUNTRIES,
-    EPOCHS,
-    FORECAST_YEARS,
-    LR,
-    PATIENCE,
-    SEED,
-    SEQ_LEN,
-    TARGET,
-    TEST_END,
-    TRAIN_END,
-    VAL_END,
     get_all_features,
     load_model_ready,
     make_loaders,
 )
+
+# All config from cfg (reads .env)
+COUNTRIES      = cfg.countries
+TARGET         = cfg.target
+SEQ_LEN        = cfg.seq_len
+EPOCHS         = cfg.epochs
+PATIENCE       = cfg.patience
+BATCH_SIZE     = cfg.batch_size
+LR             = cfg.lr
+SEED           = cfg.seed
+TRAIN_END      = cfg.train_end
+VAL_END        = cfg.val_end
+TEST_END       = cfg.test_end
+FORECAST_YEARS = cfg.forecast_years
 from src.evaluate import (
     compare_with_classical,
     compute_benchmarking,
@@ -258,7 +261,7 @@ def main() -> None:
         all_forecasts.append(fc)
 
         log.info(
-            "  %-10s (%s) forecast 2030 = %.2f TWh [%.2f, %.2f]",
+            f"  %-10s (%s) forecast {cfg.forecast_end} = %.2f TWh [%.2f, %.2f]",
             country,
             model_name,
             fc["Forecast"].iloc[-1],
@@ -272,13 +275,13 @@ def main() -> None:
         else pd.DataFrame(columns=["Year", "Forecast", "Lower_90", "Upper_90", "Country", "Model"])
     )
     df_forecast = df_forecast[["Country", "Model", "Year", "Forecast", "Lower_90", "Upper_90"]]
-    df_forecast.to_csv(os.path.join(args.output_dir, "dl_forecast_2025_2030.csv"), index=False)
+    df_forecast.to_csv(os.path.join(args.output_dir, f"dl_forecast_{cfg.forecast_start}_{cfg.forecast_end}.csv"), index=False)
     log.info("DL forecast saved: %s", df_forecast.shape)
 
     plot_dl_forecast(df, df_forecast, countries, fig_dir)
 
     # ── Growth summary ────────────────────────────────────────────────────────
-    growth_df = growth_summary(df_forecast, df, countries, base_year=2024, target_year=2030)
+    growth_df = growth_summary(df_forecast, df, countries, base_year=cfg.test_end, target_year=cfg.forecast_end)
     growth_df.to_csv(os.path.join(args.output_dir, "dl_growth_summary.csv"), index=False)
     log.info("Growth summary:\n%s", growth_df.to_string())
 

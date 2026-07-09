@@ -47,6 +47,8 @@ import pandas as pd
 import seaborn as sns
 from sklearn.ensemble import RandomForestRegressor
 
+from src.config import cfg
+
 warnings.filterwarnings("ignore")
 
 logging.basicConfig(
@@ -57,9 +59,9 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Cell 1: Constants ─────────────────────────────────────────────────────────
-COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
-TARGET = "Demand"
-DROP_COLS = ["Total", "Aggregate_fuel"]  # Cell 3 — dropped after pivot
+COUNTRIES = cfg.countries
+TARGET = cfg.target
+DROP_COLS = cfg.drop_cols  # Cell 3 — dropped after pivot
 
 PALETTE = {
     "Tunisia": "#e63946",
@@ -507,24 +509,43 @@ def compute_fi_cols(
     corr_full = df_feat[num_cols].corr()[TARGET].drop(TARGET, errors="ignore").dropna()
     corr_full = corr_full.sort_values(key=abs, ascending=False)
 
-    fi_cols = [
-        c
-        for c in num_cols
-        if c != TARGET and not c.startswith(f"{TARGET}_lag") and not c.startswith(f"{TARGET}_ma")
+    # ── Exogenous features only (for RF importance ranking) ──────────────────
+    # Demand lags excluded here to avoid trivial ranking
+    # (lag1 always ranks #1, drowning out CO2/fuel mix signals)
+    importance_cols = [
+        c for c in num_cols
+        if c != TARGET
+        and not c.startswith(f"{TARGET}_lag")
+        and not c.startswith(f"{TARGET}_ma")
     ]
 
     # Explicitly replace inf/-inf with NaN BEFORE dropna
-    df_fi = df_feat[fi_cols + [TARGET]].replace([np.inf, -np.inf], np.nan).dropna()
+    df_fi = df_feat[importance_cols + [TARGET]].replace([np.inf, -np.inf], np.nan).dropna()
 
     # Confirm no infs remain
     assert not np.isinf(df_fi.values).any(), "Still has inf values!"
     log.info("RF training shape: %s", df_fi.shape)
 
     rf = RandomForestRegressor(n_estimators=150, random_state=42, n_jobs=-1)
-    rf.fit(df_fi[fi_cols], df_fi[TARGET])
+    rf.fit(df_fi[importance_cols], df_fi[TARGET])
 
-    fi = pd.Series(rf.feature_importances_, index=fi_cols).sort_values(ascending=False)
+    fi = pd.Series(rf.feature_importances_, index=importance_cols).sort_values(ascending=False)
     log.info("Top 5 RF features:\n%s", fi.head(5).to_string())
+
+    # ── Add Demand lags back to final feature set ─────────────────────────────
+    # Valid predictors for both walk-forward eval AND recursive forecasting.
+    # Excluded from RF ranking only — not from the model.
+    demand_temporal = [
+        c for c in df_feat.columns
+        if c.startswith(f"{TARGET}_lag") or c.startswith(f"{TARGET}_ma")
+    ]
+    fi_cols = [
+    c
+    for c in num_cols
+    if c != TARGET
+    and not c.startswith(f"{TARGET}_lag")
+    and not c.startswith(f"{TARGET}_ma")
+    ]
 
     return fi_cols, corr_full, rf
 
@@ -533,14 +554,16 @@ def compute_fi_cols(
 
 
 def save_outputs(
-    df_feat: pd.DataFrame,
-    df_model: pd.DataFrame,
-    fi_cols: list[str],
-    corr_full: pd.Series,
-    all_subs: list[str],
-    features: list[str],
-    output_dir: str,
+    df_feat:     pd.DataFrame,
+    df_model:    pd.DataFrame,
+    fi_cols:     list[str],
+    corr_full:   pd.Series,
+    all_subs:    list[str],
+    features:    list[str],
+    output_dir:  str,
     train_until: int,
+    val_until:   int,
+    test_until:  int,
 ) -> None:
     """Mirrors notebook Cell 23 exactly."""
     df_feat.to_csv(os.path.join(output_dir, "ember_multifeature.csv"), index=False)
@@ -560,9 +583,9 @@ def save_outputs(
         "COUNTRIES": COUNTRIES,
         "DROP_COLS": DROP_COLS,
         "TRAIN_END": train_until,
-        "VAL_END": 2020,
-        "TEST_END": 2024,
-        "FORECAST_YEARS": list(range(2025, 2031)),
+        "VAL_END":   val_until,
+        "TEST_END":  test_until,
+        "FORECAST_YEARS": cfg.forecast_years,
     }
 
     with open(os.path.join(output_dir, "feature_meta.json"), "w") as f:
@@ -581,7 +604,18 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Ember preprocessing step")
     p.add_argument("--input_dir", default="outputs/eda", help="EDA output dir")
     p.add_argument("--output_dir", default="outputs/preprocessing", help="Output dir")
-    p.add_argument("--train_until", type=int, default=2016, help="Last training year")
+    p.add_argument(
+        "--train_until", type=int,
+        default=cfg.train_end,
+    )
+    p.add_argument(
+        "--val_until", type=int,
+        default=cfg.val_end,
+    )
+    p.add_argument(
+        "--test_until", type=int,
+        default=cfg.test_end,
+    )
     return p.parse_args()
 
 
@@ -668,13 +702,13 @@ def main() -> None:
         ax = axes[i]
         d = df_model[df_model["Area"] == c].sort_values("Year")
         tr = d[d["Year"] <= args.train_until]
-        va = d[(d["Year"] > args.train_until) & (d["Year"] <= 2020)]
-        te = d[d["Year"] > 2020]
+        va = d[(d["Year"] > args.train_until) & (d["Year"] <= args.val_until)]
+        te = d[d["Year"] > args.val_until]
         ax.plot(tr["Year"], tr[TARGET], color=zone_c["Train"], lw=2, label="Train")
         ax.plot(va["Year"], va[TARGET], color=zone_c["Val"], lw=2, label="Val")
         ax.plot(te["Year"], te[TARGET], color=zone_c["Test"], lw=2, label="Test")
         ax.axvline(args.train_until + 0.5, color="grey", ls="--", lw=1)
-        ax.axvline(2020 + 0.5, color="grey", ls=":", lw=1)
+        ax.axvline(args.val_until + 0.5, color="grey", ls=":", lw=1)
         ax.set_title(c, fontweight="bold")
         ax.set_ylabel("TWh")
         ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True, nbins=5))
@@ -685,7 +719,8 @@ def main() -> None:
     savefig(fig, os.path.join(fig_dir, "split.pdf"))
 
     save_outputs(
-        df_feat, df_model, fi_cols, corr_full, ALL_SUBS, FEATURES, args.output_dir, args.train_until
+        df_feat, df_model, fi_cols, corr_full, ALL_SUBS, FEATURES,
+        args.output_dir, args.train_until, args.val_until, args.test_until,
     )
 
 

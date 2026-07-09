@@ -6,7 +6,7 @@ metadata:
 data:
   OUTPUTS_DIR:          "outputs"
   OUTPUT_ROOT:          "outputs"
-  TRAIN_UNTIL:          "2016"
+  TRAIN_UNTIL:          "2024"
   FORECAST_UNTIL:       "2030"
   MLFLOW_TRACKING_URI:  "http://mlflow-service:5000"
   MLFLOW_ARTIFACT_ROOT: "/mlruns/artifacts"

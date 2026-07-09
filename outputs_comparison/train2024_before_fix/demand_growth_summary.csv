@@ -1,0 +1,8 @@
+Country,2025 (TWh),2025 Forecast,2030 Forecast,2030 90% Lo,2030 90% Hi,Total Growth %,CAGR 24-30 %,Test MAPE %,Forecast Quality,Model
+Egypt,235.8,242.6,276.4,268.5,282.3,17.2,2.68,2.38,Excellent,ARIMA_1_1_1
+Kuwait,87.7,89.6,100.9,99.8,101.8,15.1,2.37,1.7,Excellent,LinearTrend
+Tunisia,23.3,23.7,26.2,18.6,34.8,12.2,1.94,2.53,Excellent,Ridge
+Canada,624.3,616.3,623.0,620.1,626.2,-0.2,-0.03,0.86,Excellent,LinearTrend
+Austria,71.8,71.6,71.4,71.3,73.5,-0.5,-0.08,1.49,Excellent,RandomForest
+Germany,508.2,396.6,370.2,352.0,570.8,-27.2,-5.14,1.9,Excellent,Ridge
+France,467.7,238.0,232.7,232.7,463.3,-50.3,-10.99,2.37,Excellent,Ridge

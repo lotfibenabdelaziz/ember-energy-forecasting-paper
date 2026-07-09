@@ -21,22 +21,24 @@ from sklearn.preprocessing import StandardScaler
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset
 
+from src.config import cfg
+
 # ── Constants — must match notebook exactly ───────────────────────────────────
-COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
-TARGET = "Demand"
+COUNTRIES = cfg.countries
+TARGET = cfg.target
 
-TRAIN_END = 2016
-VAL_END = 2020
-TEST_END = 2024
-FORECAST_YEARS = list(range(2025, 2031))
+TRAIN_END      = cfg.train_end
+VAL_END        = cfg.val_end
+TEST_END       = cfg.test_end
+FORECAST_YEARS = cfg.forecast_years
+SEQ_LEN        = cfg.seq_len
+EPOCHS         = cfg.epochs
+HORIZON        = 1
+PATIENCE       = cfg.patience
+BATCH_SIZE     = cfg.batch_size
+LR             = cfg.lr
+SEED           = cfg.seed
 
-SEQ_LEN = 5  # look-back window (years)
-HORIZON = 1  # one-step-ahead
-EPOCHS = 300
-PATIENCE = 40
-BATCH_SIZE = 16
-LR = 1e-3
-SEED = 42
 
 PALETTE = {
     "Tunisia": "#e63946",

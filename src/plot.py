@@ -15,6 +15,8 @@ Mirrors notebook 04_deeplearning_enhanced_patched.ipynb figures exactly:
 from __future__ import annotations
 
 import logging
+
+from src.config import cfg
 import os
 
 import matplotlib.pyplot as plt
@@ -25,8 +27,8 @@ import seaborn as sns
 
 log = logging.getLogger(__name__)
 
-COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
-TARGET = "Demand"
+COUNTRIES = cfg.countries
+TARGET = cfg.target
 
 PALETTE = {
     "Tunisia": "#e63946",
@@ -306,7 +308,7 @@ def plot_dl_forecast(
                 label="90% CI",
             )
 
-        ax.axvline(2024.5, color="grey", ls=":", lw=1)
+        ax.axvline(cfg.test_end + 0.5, color="grey", ls=":", lw=1)
         ax.set_title(country, fontweight="bold")
         ax.set_xlabel("Year")
         ax.set_ylabel("Demand (TWh)")
@@ -317,10 +319,10 @@ def plot_dl_forecast(
         axes[j].set_visible(False)
 
     fig.suptitle(
-        "Electricity Demand Forecast 2025–2030 (DL Models)", fontsize=13, fontweight="bold"
+        f"Electricity Demand Forecast {cfg.forecast_start}-{cfg.forecast_end} (DL Models)", fontsize=13, fontweight="bold"
     )
     plt.tight_layout()
-    savefig(fig, os.path.join(fig_dir, "dl_forecast_2025_2030.pdf"))
+    savefig(fig, os.path.join(fig_dir, f"dl_forecast_{cfg.forecast_start}_{cfg.forecast_end}.pdf"))
 
 
 # ── Feature importance ────────────────────────────────────────────────────────

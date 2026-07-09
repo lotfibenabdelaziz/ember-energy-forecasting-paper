@@ -27,16 +27,14 @@ def _build_future_row(
     row: dict[str, float] = {}
 
     for lag in [1, 2, 3]:
-        k = f"{target}_lag{lag}"
-        if k in all_feature_cols:
-            idx = n - lag
-            row[k] = full_demand[idx] if idx >= 0 else np.nan
+        k   = f"{target}_lag{lag}"
+        idx = n - lag
+        row[k] = full_demand[idx] if idx >= 0 else np.nan  # always set
 
     for w in [3, 5]:
-        k = f"{target}_ma{w}"
-        if k in all_feature_cols:
-            window = full_demand[max(0, n - w) : n]
-            row[k] = float(np.mean(window)) if window else np.nan
+        k      = f"{target}_ma{w}"
+        window = full_demand[max(0, n - w) : n]
+        row[k] = float(np.mean(window)) if window else np.nan  # always set
 
     k = f"{target}_yoy"
     if k in all_feature_cols:

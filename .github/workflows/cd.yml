@@ -1,6 +1,7 @@
 # .github/workflows/cd.yml
-# Triggered on merge to main — builds, tags, and pushes Docker images
-# then optionally deploys to Kubernetes
+# Triggered on merge to main or version tag push
+# Builds, tags, and pushes Docker images to ghcr.io
+# Optionally deploys to Kubernetes (uncomment when cluster is ready)
 
 name: CD
 
@@ -10,8 +11,13 @@ on:
     tags:
       - "v*.*.*"           # e.g. v1.2.3
 
+# Prevent concurrent deployments
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
-  REGISTRY: ghcr.io
+  REGISTRY:       ghcr.io
   IMAGE_PIPELINE: ghcr.io/${{ github.repository_owner }}/ember-energy-pipeline
   IMAGE_API:      ghcr.io/${{ github.repository_owner }}/ember-energy-api
   PYTHON_VERSION: "3.10"
@@ -26,68 +32,92 @@ jobs:
       contents: read
       packages: write
 
+    outputs:
+      pipeline-tag: ${{ steps.meta-pipeline.outputs.version }}
+      api-tag:      ${{ steps.meta-api.outputs.version }}
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry:  ${{ env.REGISTRY }}
+          username:  ${{ github.actor }}
+          password:  ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Pipeline image tags
       - name: Extract metadata (pipeline image)
         id: meta-pipeline
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_PIPELINE }}
           tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-
 
+      # API image tags
       - name: Extract metadata (API image)
         id: meta-api
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_API }}
           tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
             type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-
 
+      # Build & push pipeline image
       - name: Build & push pipeline image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: Dockerfile
-          push: true
-          tags: ${{ steps.meta-pipeline.outputs.tags }}
-          labels: ${{ steps.meta-pipeline.outputs.labels }}
+          context:    .
+          file:       Dockerfile
+          push:       true
+          tags:       ${{ steps.meta-pipeline.outputs.tags }}
+          labels:     ${{ steps.meta-pipeline.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to:   type=gha,mode=max
 
+      # Build & push API image
       - name: Build & push API image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: Dockerfile.api
-          push: true
-          tags: ${{ steps.meta-api.outputs.tags }}
-          labels: ${{ steps.meta-api.outputs.labels }}
+          context:    .
+          file:       Dockerfile.api
+          push:       true
+          tags:       ${{ steps.meta-api.outputs.tags }}
+          labels:     ${{ steps.meta-api.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to:   type=gha,mode=max
 
-  # ── 2. Deploy to Kubernetes (optional — uncomment when cluster is ready) ──
+      - name: Summary
+        run: |
+          echo "### Docker Images Published" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Tags |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Pipeline | \`${{ steps.meta-pipeline.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| API      | \`${{ steps.meta-api.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
+
+  # ── 2. Deploy to Kubernetes ───────────────────────────────────────────────
+  # Uncomment when your cluster has a kubeconfig secret set up:
+  #   GitHub → Settings → Secrets → KUBECONFIG → paste base64 kubeconfig
+  #
   # deploy:
   #   name: Deploy to Kubernetes
   #   runs-on: ubuntu-latest
   #   needs: build-and-push
-  #   environment: production
+  #   environment: production          # requires manual approval in GitHub UI
+  #   if: github.ref == 'refs/heads/main'
+  #
   #   steps:
   #     - uses: actions/checkout@v4
   #
@@ -95,13 +125,29 @@ jobs:
   #       uses: azure/setup-kubectl@v3
   #
   #     - name: Configure kubeconfig
-  #       run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml
-  #
-  #     - name: Deploy
-  #       env:
-  #         KUBECONFIG: kubeconfig.yaml
   #       run: |
-  #         kubectl set image job/ember-pipeline \
+  #         mkdir -p ~/.kube
+  #         echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+  #
+  #     - name: Update pipeline CronJob image
+  #       run: |
+  #         kubectl set image cronjob/ember-pipeline-cron \
   #           pipeline=${{ env.IMAGE_PIPELINE }}:sha-${{ github.sha }} \
   #           -n ember-pipeline
-  #         kubectl rollout status deployment/ember-api -n ember-pipeline
+  #
+  #     - name: Update API Deployment image
+  #       run: |
+  #         kubectl set image deployment/ember-api \
+  #           api=${{ env.IMAGE_API }}:sha-${{ github.sha }} \
+  #           -n ember-pipeline
+  #
+  #     - name: Wait for API rollout
+  #       run: |
+  #         kubectl rollout status deployment/ember-api \
+  #           -n ember-pipeline --timeout=120s
+  #
+  #     - name: Verify API health
+  #       run: |
+  #         kubectl run health-check --image=curlimages/curl --rm -it \
+  #           --restart=Never -n ember-pipeline -- \
+  #           curl -sf http://ember-api-service/health

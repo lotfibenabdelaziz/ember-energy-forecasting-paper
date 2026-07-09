@@ -74,7 +74,8 @@ BEST_MODELS_CSV = _ROOT / "modeling" / "best_models.csv"
 BENCHMARKING_CSV = _ROOT / "modeling" / "test_benchmarking.csv"
 DL_FORECAST_CSV = _ROOT / "deeplearning" / "dl_forecast_2025_2030.csv"
 DL_METRICS_CSV = _ROOT / "deeplearning" / "dl_benchmarking.csv"
-DL_BEST_CSV = _ROOT / "deeplearning" / "dl_best_models.csv"
+DL_BEST_CSV   = _ROOT / "deeplearning" / "dl_best_models.csv"
+HISTORY_CSV   = _ROOT / "preprocessing" / "ember_model_ready.csv"
 
 FIGURES_DIRS = [
     _ROOT / "eda" / "figures",
@@ -114,6 +115,7 @@ def _load_all() -> dict[str, pd.DataFrame]:
         "dl_forecast": _load(DL_FORECAST_CSV, "dl_forecast"),
         "dl_metrics": _load(DL_METRICS_CSV, "dl_metrics"),
         "dl_best": _load(DL_BEST_CSV, "dl_best"),
+        "history": _load(HISTORY_CSV, "history"),
     }
 
 
@@ -394,6 +396,33 @@ def get_dl_forecast(country: str) -> dict:
         "forecast_twh": [round(v, 3) for v in sub["Forecast"].tolist()],
     }
 
+
+
+# ── Historical data 2000-2024 ─────────────────────────────────────────────────
+
+
+@app.get("/history/{country}", tags=["forecast"], dependencies=[Depends(get_current_user)])
+def get_history(country: str) -> dict:
+    """Historical electricity demand 2000-2024 with event annotations."""
+    country = _validate_country(country)
+    df = _require(_DATA["history"], "History")
+
+    sub = df[df["Area"] == country].sort_values("Year")
+    if sub.empty:
+        raise HTTPException(404, f"No history data for {country}")
+
+    events = [
+        {"year": 2009, "label": "2008 financial crisis", "color": "#6b7280"},
+        {"year": 2020, "label": "COVID-19 pandemic",      "color": "#e63946"},
+        {"year": 2022, "label": "Ukraine-Russia war",      "color": "#ff9f1c"},
+    ]
+
+    return {
+        "country":    country,
+        "years":      sub["Year"].tolist(),
+        "demand_twh": [round(float(v), 3) for v in sub["Demand"].tolist()],
+        "events":     events,
+    }
 
 # ── Classical metrics ─────────────────────────────────────────────────────────
 
