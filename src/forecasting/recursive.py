@@ -65,10 +65,11 @@ def _build_future_row(
             else:
                 row[k] = 0.0
 
-    year_min = int(history_df["Year"].min())
+    year_min    = int(history_df["Year"].min())
     future_year = int(history_df["Year"].max()) + step + 1
     row["trend"] = future_year - year_min
-    row["trend_sq"] = row["trend"] ** 2
+    if "trend_sq" in all_feature_cols:
+        row["trend_sq"] = row["trend"] ** 2
     if "country_code" in all_feature_cols and "country_code" in history_df.columns:
         row["country_code"] = int(history_df["country_code"].iloc[0])
     for col in all_feature_cols:

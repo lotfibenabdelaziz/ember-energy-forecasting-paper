@@ -53,18 +53,35 @@ def forecast_statistical(series: np.ndarray, model_name: str, horizon: int) -> n
 def extrapolate_exog(
     history_df: pd.DataFrame, exog_cols: list[str], n_steps: int
 ) -> dict[str, np.ndarray]:
-    """Linear trend extrapolation per exogenous feature."""
+    """
+    Linear trend extrapolation per exogenous feature.
+    Clipped to ±30% of last known value per step to prevent
+    explosive extrapolation of non-monotone series.
+    """
     preds: dict[str, np.ndarray] = {}
     n = len(history_df)
     for col in exog_cols:
-        y = history_df[col].values.astype(float)
-        y = np.where(np.isfinite(y), y, np.nanmedian(y))
+        y        = history_df[col].values.astype(float)
+        y        = np.where(np.isfinite(y), y, np.nanmedian(y))
+        last_val = y[-1]
         X = np.arange(n).reshape(-1, 1)
         try:
-            m = LinearRegression().fit(X, y)
-            preds[col] = m.predict(np.arange(n, n + n_steps).reshape(-1, 1))
+            m   = LinearRegression().fit(X, y)
+            raw = m.predict(np.arange(n, n + n_steps).reshape(-1, 1)).flatten()
+            # Clip each step to ±30% of last known value
+            # Band grows slightly with horizon (+5% per year)
+            clipped = np.zeros(n_steps)
+            for step in range(n_steps):
+                band = abs(last_val) * (0.30 + 0.05 * step)
+                if last_val != 0:
+                    clipped[step] = np.clip(raw[step],
+                                            last_val - band,
+                                            last_val + band)
+                else:
+                    clipped[step] = raw[step]
+            preds[col] = clipped
         except Exception:
-            preds[col] = np.full(n_steps, y[-1])
+            preds[col] = np.full(n_steps, last_val)
     return preds
 
 

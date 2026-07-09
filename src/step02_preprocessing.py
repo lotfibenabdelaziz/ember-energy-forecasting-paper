@@ -509,14 +509,24 @@ def compute_fi_cols(
     corr_full = df_feat[num_cols].corr()[TARGET].drop(TARGET, errors="ignore").dropna()
     corr_full = corr_full.sort_values(key=abs, ascending=False)
 
-    # ── Exogenous features only (for RF importance ranking) ──────────────────
-    # Demand lags excluded here to avoid trivial ranking
-    # (lag1 always ranks #1, drowning out CO2/fuel mix signals)
+    # ── Features to EXCLUDE from fi_cols ─────────────────────────────────────
+    # Electricity_imports: component of Demand formula → circular relationship
+    # demand_ratio_*:      uses Demand in numerator → circular
+    # trend_sq:            quadratic trend causes Ridge extrapolation instability
+    EXCLUDE_PATTERNS = [
+        "Electricity_imports",   # and all derivatives: _lag1/2/3, _ma3/5, _yoy
+        "demand_ratio",          # demand_ratio_Fuel, demand_ratio_Electricity_imports
+        "trend_sq",              # keep linear trend only
+    ]
+
+    # Importance ranking uses exogenous features only (no Demand lags)
+    # Demand lags would trivially rank #1, drowning out CO2/Fuel signals
     importance_cols = [
         c for c in num_cols
         if c != TARGET
         and not c.startswith(f"{TARGET}_lag")
         and not c.startswith(f"{TARGET}_ma")
+        and not any(pat in c for pat in EXCLUDE_PATTERNS)
     ]
 
     # Explicitly replace inf/-inf with NaN BEFORE dropna
@@ -532,20 +542,19 @@ def compute_fi_cols(
     fi = pd.Series(rf.feature_importances_, index=importance_cols).sort_values(ascending=False)
     log.info("Top 5 RF features:\n%s", fi.head(5).to_string())
 
-    # ── Add Demand lags back to final feature set ─────────────────────────────
-    # Valid predictors for both walk-forward eval AND recursive forecasting.
-    # Excluded from RF ranking only — not from the model.
+    # ── Final fi_cols: exogenous (filtered) + Demand temporal ────────────────
+    # Demand lags/MAs added back — valid predictors for recursive forecasting
     demand_temporal = [
         c for c in df_feat.columns
         if c.startswith(f"{TARGET}_lag") or c.startswith(f"{TARGET}_ma")
     ]
-    fi_cols = [
-    c
-    for c in num_cols
-    if c != TARGET
-    and not c.startswith(f"{TARGET}_lag")
-    and not c.startswith(f"{TARGET}_ma")
-    ]
+    fi_cols = importance_cols + demand_temporal
+
+    log.info(
+        "fi_cols: %d exogenous + %d demand temporal = %d total",
+        len(importance_cols), len(demand_temporal), len(fi_cols),
+    )
+    log.info("Excluded: Electricity_imports (all), demand_ratio_*, trend_sq")
 
     return fi_cols, corr_full, rf
 

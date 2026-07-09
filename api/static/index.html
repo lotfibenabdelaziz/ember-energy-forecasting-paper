@@ -257,9 +257,10 @@
     /* ── Chart card ──────────────────────────────────────────── */
     .chart-card {
       background: var(--bg2);
-      border: 1px solid var(--border);
+      border: 1px solid var(--border2);
       border-radius: var(--radius-lg);
       padding: 20px 22px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.3);
     }
 
     .chart-legend {
@@ -279,7 +280,8 @@
 
     .leg-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 
-    .chart-wrap { position: relative; height: 260px; }
+    .chart-wrap { position: relative; height: 320px; }
+    .chart-wrap.tall { height: 380px; }
 
     /* ── Two-col grid ────────────────────────────────────────── */
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -435,12 +437,32 @@
     .fade-up { animation: fadeUp .25s ease forwards; }
 
     /* ── Responsive ──────────────────────────────────────────── */
-    @media (max-width: 768px) {
+    @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
-      .sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; padding: 16px; }
+      .sidebar {
+        position: static; height: auto;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        align-items: start;
+        gap: 12px;
+        padding: 16px;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+      .logo { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
       .country-section { margin-top: 0; border-top: none; padding-top: 0; }
       .main { padding: 20px 16px; }
       .two-col { grid-template-columns: 1fr; }
+      .stat-grid { grid-template-columns: repeat(2, 1fr); }
+      .chart-wrap { height: 240px; }
+      .chart-wrap.tall { height: 300px; }
+    }
+    @media (max-width: 480px) {
+      .sidebar { grid-template-columns: 1fr; }
+      .stat-grid { grid-template-columns: 1fr 1fr; }
+      .page-title { font-size: 20px; }
+      .chart-wrap { height: 200px; }
+      .chart-wrap.tall { height: 260px; }
     }
 
     /* ── Login overlay ───────────────────────────────────────── */
@@ -748,7 +770,7 @@
       <div class="page-header">
         <div>
           <div class="page-title">Overview — <span id="ov-country">Tunisia</span></div>
-          <div class="page-meta">Electricity demand forecast · Ember dataset · Train 2000–2016 · Forecast 2025–2030</div>
+          <div class="page-meta">Electricity demand 2000–2024 (actual) + 2025–2030 (forecast) · Ember dataset</div>
         </div>
         <div class="status-row">
           <span class="pill pill-green" id="api-status">● connecting…</span>
@@ -804,8 +826,8 @@
             <div class="leg-item"><div class="leg-dot" style="background:#e63946;border-radius:2px;width:3px;height:14px"></div>COVID-19</div>
             <div class="leg-item"><div class="leg-dot" style="background:#ff9f1c;border-radius:2px;width:3px;height:14px"></div>Ukraine war</div>
           </div>
-          <div class="chart-wrap">
-            <canvas id="ovForecastChart" role="img" aria-label="Demand forecast line chart 2025 to 2030">Loading…</canvas>
+          <div class="chart-wrap tall">
+            <canvas id="ovForecastChart" role="img" aria-label="Demand history and forecast 2000-2030">Loading…</canvas>
           </div>
         </div>
       </div>
@@ -1214,6 +1236,8 @@
     currentCountry = document.getElementById('countrySelect').value;
     const activePage = document.querySelector('.page.active').id.replace('page-','');
     updateCountryLabels(currentCountry);
+    // Destroy ALL charts immediately — prevents stale country data showing
+    ['ovForecast','fcClassic','fcDL','compareBar'].forEach(destroyChart);
     loadPage(activePage);
   }
 
@@ -1235,6 +1259,7 @@
   /* ── OVERVIEW ────────────────────────────────────────────────── */
   async function loadOverview(){
     const c = currentCountry;
+    destroyChart('ovForecast'); // clear before fetch so old data never flashes
     try {
       const [fc, gr, bm] = await Promise.all([
         apiFetch('/forecast/'+c),
@@ -1300,23 +1325,23 @@
           labels: allYears,
           datasets: [
             { type:'line', label:'Historical', data: histData,
-              borderColor:'#6b7280', backgroundColor:'rgba(107,114,128,.06)',
+              borderColor:'#94a3b8', backgroundColor:'rgba(148,163,184,.07)',
               borderWidth:2, pointRadius:2, tension:.35, fill:true,
               spanGaps:false },
             { type:'line', label:'Classical', data: clsData,
-              borderColor:'#3b9eff', backgroundColor:'rgba(59,158,255,.08)',
+              borderColor:'#60b4ff', backgroundColor:'rgba(96,180,255,.09)',
               borderWidth:2.5, pointRadius:4, tension:.35, fill:false,
               spanGaps:false },
             { type:'line', label:'DL', data: dlData,
-              borderColor:'#00d4a0', backgroundColor:'rgba(0,212,160,.06)',
+              borderColor:'#00e5aa', backgroundColor:'rgba(0,229,170,.07)',
               borderWidth:2, pointRadius:4, tension:.35, fill:false,
               borderDash:[5,3], spanGaps:false },
             ...(upData ? [
               { type:'line', label:'Upper 90%', data: upData,
-                borderColor:'rgba(59,158,255,.18)', backgroundColor:'rgba(59,158,255,.07)',
+                borderColor:'rgba(96,180,255,.30)', backgroundColor:'rgba(96,180,255,.10)',
                 borderWidth:1, pointRadius:0, tension:.35, fill:'+1', spanGaps:false },
               { type:'line', label:'Lower 90%', data: loData,
-                borderColor:'rgba(59,158,255,.18)', backgroundColor:'transparent',
+                borderColor:'rgba(96,180,255,.30)', backgroundColor:'transparent',
                 borderWidth:1, pointRadius:0, tension:.35, fill:false, spanGaps:false }
             ] : [])
           ]
@@ -1334,11 +1359,11 @@
           },
           scales:{
             x:{
-              grid:{color:'rgba(255,255,255,.04)'},
+              grid:{color:'rgba(255,255,255,.08)'},
               ticks:{ font:{size:10}, maxTicksLimit:16, maxRotation:0,
                 callback: (val,i) => allYears[i] % 5 === 0 ? allYears[i] : '' }
             },
-            y:{ grid:{color:'rgba(255,255,255,.04)'},
+            y:{ grid:{color:'rgba(255,255,255,.08)'},
               ticks:{ font:{size:11},
                 callback: v => v >= 1000 ? (v/1000).toFixed(1)+'k' : v.toFixed(1) }}
           },
@@ -1356,6 +1381,8 @@
   /* ── FORECAST ────────────────────────────────────────────────── */
   async function loadForecast(){
     const c = currentCountry;
+    destroyChart('fcClassic');
+    destroyChart('fcDL');
     try {
       const [fc, dlFc] = await Promise.all([
         apiFetch('/forecast/'+c),
@@ -1383,7 +1410,7 @@
             borderColor: ev.color, borderWidth:1.5, borderDash:[4,3],
             label:{ display:true, content: ev.label,
               font:{size:9, family:"'DM Mono', monospace"},
-              color: ev.color, backgroundColor:'rgba(10,12,16,.85)',
+              color: ev.color, backgroundColor:'rgba(15,18,28,.92)', borderColor:'rgba(255,255,255,.1)', borderWidth:1,
               position:'start', yAdjust:-6,
               padding:{x:6,y:3}, borderRadius:4 }
           };
@@ -1404,7 +1431,7 @@
             borderColor:'#6b7280', backgroundColor:'rgba(107,114,128,.08)',
             borderWidth:2, pointRadius:2, tension:.35, fill:true, spanGaps:false },
           { label:'Classical', data: clsData,
-            borderColor:'#3b9eff', backgroundColor:'rgba(59,158,255,.12)',
+            borderColor:'#60b4ff', backgroundColor:'rgba(96,180,255,.10)',
             borderWidth:2.5, pointRadius:5, tension:.35, fill:true, spanGaps:false },
           ...(upData ? [
             { label:'Upper', data: upData,
@@ -1422,10 +1449,10 @@
               callbacks:{ label: ctx => ctx.dataset.label+': '+
                 (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(1)+' TWh' : '—') }}},
           scales:{
-            x:{ grid:{color:'rgba(255,255,255,.04)'},
+            x:{ grid:{color:'rgba(255,255,255,.08)'},
               ticks:{font:{size:10}, maxTicksLimit:16, maxRotation:0,
                 callback:(val,i)=> allYrs[i]%5===0 ? allYrs[i] : ''} },
-            y:{ grid:{color:'rgba(255,255,255,.04)'},
+            y:{ grid:{color:'rgba(255,255,255,.08)'},
               ticks:{callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(1)}} },
           interaction:{mode:'nearest',axis:'x',intersect:false} }
       });
@@ -1440,7 +1467,7 @@
             borderColor:'#6b7280', backgroundColor:'rgba(107,114,128,.08)',
             borderWidth:2, pointRadius:2, tension:.35, fill:true, spanGaps:false },
           { label:'Deep Learning', data: dlData2,
-            borderColor:'#00d4a0', backgroundColor:'rgba(0,212,160,.12)',
+            borderColor:'#00e5aa', backgroundColor:'rgba(0,229,170,.09)',
             borderWidth:2.5, pointRadius:5, tension:.35, fill:true, spanGaps:false }
         ]},
         options:{ responsive:true, maintainAspectRatio:false,
@@ -1450,10 +1477,10 @@
               callbacks:{ label: ctx => ctx.dataset.label+': '+
                 (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(1)+' TWh' : '—') }}},
           scales:{
-            x:{ grid:{color:'rgba(255,255,255,.04)'},
+            x:{ grid:{color:'rgba(255,255,255,.08)'},
               ticks:{font:{size:10}, maxTicksLimit:16, maxRotation:0,
                 callback:(val,i)=> allYrs[i]%5===0 ? allYrs[i] : ''} },
-            y:{ grid:{color:'rgba(255,255,255,.04)'},
+            y:{ grid:{color:'rgba(255,255,255,.08)'},
               ticks:{callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(1)}} },
           interaction:{mode:'nearest',axis:'x',intersect:false} }
       });
@@ -1479,6 +1506,7 @@
   /* ── COMPARE ─────────────────────────────────────────────────── */
   async function loadCompare(){
     const c = currentCountry;
+    destroyChart('compareBar');
     try {
       const cmp = await apiFetch('/compare/'+c);
 
@@ -1530,7 +1558,7 @@
           plugins:{legend:{display:false}},
           scales:{
             x:{grid:{display:false}, ticks:{font:{size:11}}},
-            y:{grid:{color:'rgba(255,255,255,.04)'}, ticks:{font:{size:11}}}
+            y:{grid:{color:'rgba(255,255,255,.08)'}, ticks:{font:{size:11}}}
           }
         }
       });
