@@ -202,12 +202,12 @@ run-force: $(CSV_PATH)
 # ── Individual steps ──────────────────────────────────────────────────────────
 run-eda: $(CSV_PATH)
 	@echo "── [run-eda] Running EDA step…"
-	$(PYTHON) src/01_eda.py --csv $(CSV_PATH) --output_dir outputs/eda
+	$(PYTHON) src/step01_eda.py --csv $(CSV_PATH) --output_dir outputs/eda
 	@echo "✓  EDA complete → outputs/eda/"
 
 run-preprocessing:
 	@echo "── [run-preprocessing] Running preprocessing step…"
-	$(PYTHON) src/02_preprocessing.py --input_dir outputs/eda --output_dir outputs/preprocessing --train_until $(TRAIN_UNTIL)
+	$(PYTHON) src/step02_preprocessing.py --input_dir outputs/eda --output_dir outputs/preprocessing --train_until $(TRAIN_UNTIL)
 	@echo "✓  Preprocessing complete → outputs/preprocessing/"
 
 run-modeling:
@@ -217,7 +217,7 @@ run-modeling:
 
 run-forecasting:
 	@echo "── [run-forecasting] Running forecasting step…"
-	$(SET_MLFLOW) $(PYTHON) src/04_forecasting.py --model_dir outputs/modeling --pre_dir outputs/preprocessing --output_dir outputs/forecasting --forecast_until $(FORECAST_UNTIL)
+	$(SET_MLFLOW) $(PYTHON) src/step04_forecasting.py --model_dir outputs/modeling --pre_dir outputs/preprocessing --output_dir outputs/forecasting --forecast_until $(FORECAST_UNTIL)
 	@echo "✓  Forecasting complete → outputs/forecasting/"
 
 run-deeplearning:

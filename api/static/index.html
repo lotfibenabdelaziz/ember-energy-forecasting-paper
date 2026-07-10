@@ -16,6 +16,13 @@
   <!-- Chart.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/3.0.1/chartjs-plugin-annotation.min.js"></script>
+  <script>
+    // Register annotation plugin with Chart.js v4
+    if (window.Chart && window['chartjs-plugin-annotation']) {
+      Chart.register(window['chartjs-plugin-annotation']);
+    }
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/3.0.1/chartjs-plugin-annotation.min.js"></script>
 
   <style>
     /* ── Reset & base ─────────────────────────────────────────── */
@@ -1350,7 +1357,7 @@
           responsive:true, maintainAspectRatio:false,
           plugins:{
             legend:{ display:false },
-            annotation: Object.keys(eventAnnotations).length ? { annotations: eventAnnotations } : undefined,
+            annotation: Object.keys(eventAnnotations).length ? { annotations: eventAnnotations } : {},
             tooltip:{
               mode:'index', intersect:false,
               callbacks:{ label: ctx => ctx.dataset.label+': '+
@@ -1444,7 +1451,7 @@
         ]},
         options:{ responsive:true, maintainAspectRatio:false,
           plugins:{ legend:{display:false},
-            annotation:{ annotations: makeEventAnnotations(allYrs) },
+            annotation: { annotations: makeEventAnnotations(allYrs) },
             tooltip:{ mode:'index', intersect:false,
               callbacks:{ label: ctx => ctx.dataset.label+': '+
                 (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(1)+' TWh' : '—') }}},
@@ -1472,7 +1479,7 @@
         ]},
         options:{ responsive:true, maintainAspectRatio:false,
           plugins:{ legend:{display:false},
-            annotation:{ annotations: makeEventAnnotations(allYrs) },
+            annotation: { annotations: makeEventAnnotations(allYrs) },
             tooltip:{ mode:'index', intersect:false,
               callbacks:{ label: ctx => ctx.dataset.label+': '+
                 (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(1)+' TWh' : '—') }}},

@@ -3,15 +3,11 @@ src/config.py — Central Configuration Reader
 ==============================================
 Ember Energy | IEEE Paper
 
-Single source of truth for all runtime configuration.
-Reads from environment variables (loaded from .env by pipeline.py).
-
-Usage in any module:
+Single source of truth. Reads all values from .env via environment variables.
+Import anywhere:
     from src.config import cfg
-
-    print(cfg.train_end)      # 2024
-    print(cfg.countries)      # ["Tunisia", "Austria", ...]
-    print(cfg.forecast_years) # [2025, 2026, ..., 2030]
+    cfg.train_end      # 2024
+    cfg.forecast_years # [2025,...,2030]
 """
 
 from __future__ import annotations
@@ -23,14 +19,11 @@ from dataclasses import dataclass, field
 def _int(key: str, default: int) -> int:
     return int(os.getenv(key, str(default)))
 
-
 def _float(key: str, default: float) -> float:
     return float(os.getenv(key, str(default)))
 
-
 def _str(key: str, default: str) -> str:
     return os.getenv(key, default).strip()
-
 
 def _list(key: str, default: list[str]) -> list[str]:
     val = os.getenv(key, "")
@@ -39,23 +32,17 @@ def _list(key: str, default: list[str]) -> list[str]:
 
 @dataclass(frozen=True)
 class Config:
-    """
-    All project configuration — frozen dataclass (immutable after init).
-    Populated once from environment variables at import time.
-    """
-
     # ── Data ──────────────────────────────────────────────────────────────────
     csv_path: str = field(
         default_factory=lambda: _str(
-            "CSV_PATH",
-            "data/raw/yearly_full_release_long_format.csv"
+            "CSV_PATH", "data/raw/yearly_full_release_long_format.csv"
         )
     )
-    target: str = field(default_factory=lambda: _str("TARGET", "Demand"))
+    target:    str       = field(default_factory=lambda: _str("TARGET", "Demand"))
     countries: list[str] = field(
         default_factory=lambda: _list(
             "COUNTRIES",
-            ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
+            ["Tunisia","Austria","Germany","Egypt","Canada","France","Kuwait"]
         )
     )
     drop_cols: list[str] = field(
@@ -63,16 +50,15 @@ class Config:
     )
 
     # ── Splits ────────────────────────────────────────────────────────────────
-    train_end:      int = field(default_factory=lambda: _int("TRAIN_END",  2024))
-    val_end:        int = field(default_factory=lambda: _int("VAL_END",    2020))
-    test_end:       int = field(default_factory=lambda: _int("TEST_END",   2024))
+    train_end:      int = field(default_factory=lambda: _int("TRAIN_END",      2016))
+    val_end:        int = field(default_factory=lambda: _int("VAL_END",        2020))
+    test_end:       int = field(default_factory=lambda: _int("TEST_END",       2024))
     forecast_start: int = field(default_factory=lambda: _int("FORECAST_START", 2025))
     forecast_end:   int = field(default_factory=lambda: _int("FORECAST_END",   2030))
 
     # ── MLflow ────────────────────────────────────────────────────────────────
     mlflow_uri:        str = field(default_factory=lambda: _str("MLFLOW_TRACKING_URI", "http://localhost:5000"))
     mlflow_experiment: str = field(default_factory=lambda: _str("MLFLOW_EXPERIMENT", "ember-demand-forecasting"))
-    mlflow_artifact:   str = field(default_factory=lambda: _str("MLFLOW_ARTIFACT_ROOT", "./mlruns/artifacts"))
 
     # ── Outputs ───────────────────────────────────────────────────────────────
     output_root: str = field(default_factory=lambda: _str("OUTPUT_ROOT", "outputs"))
@@ -86,12 +72,10 @@ class Config:
     seed:       int   = field(default_factory=lambda: _int("SEED",       42))
 
     # ── API ───────────────────────────────────────────────────────────────────
-    port:           int = field(default_factory=lambda: _int("PORT", 8000))
-    env:            str = field(default_factory=lambda: _str("ENV", "development"))
-    admin_username: str = field(default_factory=lambda: _str("ADMIN_USERNAME", "admin"))
+    port: int = field(default_factory=lambda: _int("PORT", 8000))
+    env:  str = field(default_factory=lambda: _str("ENV", "development"))
 
     # ── Derived properties ────────────────────────────────────────────────────
-
     @property
     def forecast_years(self) -> list[int]:
         return list(range(self.forecast_start, self.forecast_end + 1))
@@ -126,14 +110,11 @@ class Config:
 
     def summary(self) -> str:
         return (
-            f"Config("
-            f"train={self.train_end}, val={self.val_end}, "
+            f"Config(train={self.train_end}, val={self.val_end}, "
             f"test={self.test_end}, forecast={self.forecast_years}, "
-            f"countries={len(self.countries)}, "
-            f"seq_len={self.seq_len}, epochs={self.epochs}"
-            f")"
+            f"countries={len(self.countries)})"
         )
 
 
-# ── Singleton — import this everywhere ────────────────────────────────────────
+# ── Singleton ─────────────────────────────────────────────────────────────────
 cfg = Config()

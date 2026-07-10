@@ -25,6 +25,9 @@ Writes:  outputs/modeling/test_benchmarking.csv
 
 from __future__ import annotations
 
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
 import argparse
 import json
 import logging
@@ -109,10 +112,15 @@ def main() -> None:
 
     # ── 4. Walk-forward on VAL (only if val period exists) ────────────────────
     if val_years:
-        log.info("── Walk-forward VAL evaluation: years %s", val_years)
-        val_res     = walk_forward_evaluate(df, good_features, TARGET, val_years, best_hp)
-        val_metrics = agg_metrics(val_res)
-        log.info("Val walk-forward results: %s", val_res.shape)
+        if val_years:
+            log.info("── Walk-forward VAL evaluation: years %s", val_years)
+            val_res     = walk_forward_evaluate(df, good_features, TARGET, val_years, best_hp)
+            val_metrics = agg_metrics(val_res)
+            log.info("Val walk-forward results: %s", val_res.shape)
+        else:
+            log.warning("Val years empty (train_end=%d >= val_end=%d) — skipping", train_end, val_end)
+            val_res     = pd.DataFrame(columns=["Country", "Model", "y_actual", "y_pred"])
+            val_metrics = pd.DataFrame(columns=["Country", "Model", "MAE", "RMSE", "MAPE"])
     else:
         log.warning(
             "Val years empty (train_end=%d >= val_end=%d) — skipping val evaluation",
