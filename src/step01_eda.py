@@ -14,6 +14,17 @@ import logging
 import os
 import warnings
 
+# ── Windows home/cache-dir fix — see src/config.py for full explanation ──────
+if os.name == "nt":
+    import tempfile
+    _fallback_dir = tempfile.gettempdir()
+    os.environ.setdefault("USERPROFILE", _fallback_dir)
+    os.environ.setdefault("LOCALAPPDATA", _fallback_dir)
+    os.environ.setdefault("HOMEDRIVE", os.path.splitdrive(_fallback_dir)[0] or "C:")
+    os.environ.setdefault("HOMEPATH", os.path.splitdrive(_fallback_dir)[1] or "\\Temp")
+    os.environ.setdefault("HOME", _fallback_dir)
+    os.environ.setdefault("MPLCONFIGDIR", os.path.join(_fallback_dir, "mplcache"))
+
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
@@ -69,9 +80,16 @@ def savefig(fig, path: str) -> None:
 
 # ── Load ──────────────────────────────────────────────────────────────────────
 def load_data(csv_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Load raw Ember CSV, filter to the 7 target countries, and keep only
+    the original Subcategory column (CO2_intensity, Demand, Demand_per_capita,
+    Electricity_imports, Fuel — the ~5-variable set proven stable across
+    all 7 countries, with no missing-generation-category NaN cascades).
+    """
     log.info("Loading: %s", csv_path)
     df_all = pd.read_csv(csv_path)
     df_all.columns = df_all.columns.str.strip()
+
     df_long = df_all[df_all["Area"].isin(COUNTRIES)][
         ["Area", "Year", "Subcategory", "Unit", "Value"]
     ].copy()

@@ -11,8 +11,6 @@ All matplotlib/seaborn figures for 03_modeling.py:
 from __future__ import annotations
 
 import logging
-
-from src.config import cfg
 import os
 
 import matplotlib.pyplot as plt
@@ -23,7 +21,7 @@ import seaborn as sns
 
 log = logging.getLogger(__name__)
 
-COUNTRIES = cfg.countries
+COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
 
 
 def savefig(fig: plt.Figure, path: str) -> None:
@@ -117,7 +115,11 @@ def plot_walk_forward_test(
     for i, country in enumerate(COUNTRIES):
         ax = axes[i]
         full   = df[df["Area"] == country].sort_values("Year")
-        best_m = best_test[best_test["Country"] == country]["Model"].values[0]
+        _row = best_test[best_test["Country"] == country]
+        if _row.empty:
+            ax.set_visible(False)
+            continue
+        best_m = _row["Model"].values[0]
         ax.plot(full["Year"], full[target], "k-", lw=2, label="Actual", zorder=5)
         c_res = res[res["Country"] == country]
         for j, model in enumerate(c_res["Model"].unique()):
@@ -146,7 +148,11 @@ def plot_residuals(
     fig, axes = plt.subplots(2, 4, figsize=(18, 7))
     axes = axes.flatten()
     for i, country in enumerate(COUNTRIES):
-        best_m = best_test[best_test["Country"] == country]["Model"].values[0]
+        _row = best_test[best_test["Country"] == country]
+        if _row.empty:
+            axes[i].set_visible(False)
+            continue
+        best_m = _row["Model"].values[0]
         r = res[(res["Country"] == country) & (res["Model"] == best_m)]
         clrs_bar = ["tomato" if e < 0 else "steelblue" for e in r["error"]]
         axes[i].bar(r["Year"], r["error"], color=clrs_bar)

@@ -12,9 +12,6 @@ Mirrors notebook 04_deeplearning_enhanced_patched.ipynb sections:
 
 from __future__ import annotations
 
-import sys as _sys, os as _os
-_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-
 import json
 import os
 
@@ -24,23 +21,21 @@ from sklearn.preprocessing import StandardScaler
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset
 
-from src.config import cfg
-
 # ── Constants — must match notebook exactly ───────────────────────────────────
-COUNTRIES = cfg.countries
-TARGET = cfg.target
+COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
+TARGET = "Demand"
 
-TRAIN_END      = cfg.train_end
-VAL_END        = cfg.val_end
-TEST_END       = cfg.test_end
-FORECAST_YEARS = cfg.forecast_years
-SEQ_LEN        = cfg.seq_len
-EPOCHS         = cfg.epochs
+TRAIN_END      = 2016
+VAL_END        = 2020
+TEST_END       = 2024
+FORECAST_YEARS = list(range(2025, 2031))
+SEQ_LEN        = 5
+EPOCHS         = 300
 HORIZON        = 1
-PATIENCE       = cfg.patience
-BATCH_SIZE     = cfg.batch_size
-LR             = cfg.lr
-SEED           = cfg.seed
+PATIENCE       = 40
+BATCH_SIZE     = 16
+LR             = 1e-3
+SEED           = 42
 
 
 PALETTE = {

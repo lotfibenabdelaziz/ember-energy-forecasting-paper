@@ -1,5 +1,5 @@
 """
-src/modeling/tune.py — Hyperparameter Tuning (Ridge/RF/XGBoost)
+src/modeling/tune.py — Hyperparameter Tuning (Ridge/ElasticNet/RF/XGBoost)
 ==================================================================
 Ember Energy | IEEE Paper — Classical modeling module
 
@@ -16,7 +16,7 @@ import os
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import ElasticNet, Ridge
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 
 from src.modeling.features import prepare_xy
@@ -76,6 +76,18 @@ def tune_hyperparameters(
     best_ridge_alpha = ridge_grid.best_params_["alpha"]
     log.info("Best Ridge alpha: %s", best_ridge_alpha)
 
+    # ElasticNet
+    en_grid = GridSearchCV(
+        ElasticNet(max_iter=5000),
+        {"alpha": [0.01, 0.1, 1.0], "l1_ratio": [0.2, 0.5, 0.8]},
+        cv=tscv,
+        scoring="neg_mean_absolute_error",
+        refit=True,
+    )
+    en_grid.fit(X_tune, y_tune)
+    best_en_params = en_grid.best_params_
+    log.info("Best ElasticNet params: %s", best_en_params)
+
     # Random Forest
     rf_grid = GridSearchCV(
         RandomForestRegressor(random_state=42, n_jobs=-1),
@@ -106,6 +118,8 @@ def tune_hyperparameters(
 
     best_hp = {
         "Ridge": {"alpha": best_ridge_alpha},
+        "ElasticNet": best_en_params,
+        "BayesianRidge": {"max_iter": 500},
         "RandomForest": best_rf_params,
         "XGBoost": best_xgb_params,
     }

@@ -1,32 +1,18 @@
 # =============================================================================
 # Makefile — Ember Energy Forecasting Pipeline
 # IEEE Paper | CI/CD + MLflow
-# Cross-platform: Windows (PowerShell) + Linux/macOS (bash)
+# Bash-only (Linux / macOS / WSL / Git Bash)
 # =============================================================================
 
-# ── Detect OS and configure shell ────────────────────────────────────────────
-ifeq ($(OS),Windows_NT)
-    SHELL        := powershell.exe
-    .SHELLFLAGS  := -NoProfile -NonInteractive -Command
-    RM           := Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-    MKDIR        := New-Item -ItemType Directory -Force -Path
-    SEP          := ;
-    DEVNULL      := 2>$$null
-    IS_WIN       := 1
-else
-    SHELL        := /bin/bash
-    .SHELLFLAGS  := -euo pipefail -c
-    RM           := rm -rf
-    MKDIR        := mkdir -p
-    SEP          := :
-    DEVNULL      := 2>/dev/null
-    IS_WIN       :=
-endif
+SHELL       := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
 
-ifdef IS_WIN
-export PATH := $(PATH)$(SEP)C:/Program Files/Docker/Docker/resources/bin
-endif
+RM      = $(PYTHON) -c "import sys,shutil,os; [shutil.rmtree(p, ignore_errors=True) if os.path.isdir(p) else os.remove(p) for p in sys.argv[1:] if os.path.exists(p)]"
+MKDIR   = $(PYTHON) -c "import sys,os; os.makedirs(sys.argv[1], exist_ok=True)"
+DEVNULL := 2>/dev/null
+
 PYTEST_OPTS = -p no:cacheprovider
+
 # ── Image config ──────────────────────────────────────────────────────────────
 IMAGE_NAME  ?= ember-energy-pipeline
 IMAGE_TAG   ?= latest
@@ -41,42 +27,38 @@ NAMESPACE      ?= ember-pipeline
 MLFLOW_PORT    ?= 5000
 PORT           ?= 8000
 
-ifeq ($(OS),Windows_NT)
-    PYTHON ?= python
-else
-    PYTHON ?= python3
-endif
-PIP ?= $(PYTHON) -m pip
+PYTHON ?= $(shell for p in python python3; do "$$p" --version >/dev/null 2>&1 && echo "$$p" && break; done)
+PIP    ?= $(PYTHON) -m pip
+
+# Fix: on Windows Git Bash, HOME isn't visible to Windows-native Python,
+# so matplotlib's Path.home() lookup fails. Give it a local, always-valid dir.
+export MPLCONFIGDIR := $(CURDIR)/.mplconfig
 
 # ── Environment helpers ───────────────────────────────────────────────────────
-ifdef IS_WIN
-    SET_MLFLOW  = $$env:MLFLOW_TRACKING_URI='http://localhost:$(MLFLOW_PORT)';
-    SET_DEV_ENV = $$env:ENV='development'; $$env:OUTPUT_ROOT='outputs';
-else
-    SET_MLFLOW  = MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT)
-    SET_DEV_ENV = ENV=development OUTPUT_ROOT=outputs
-endif
+SET_MLFLOW  = MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT)
+SET_DEV_ENV = ENV=development OUTPUT_ROOT=outputs
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
-.PHONY: help install api-install lint lint-fix format typecheck check \
-	    run run-eda run-preprocessing run-modeling run-forecasting run-deeplearning \
-	    rerun-eda rerun-preprocessing rerun-modeling rerun-forecasting rerun-deeplearning \
-	    test test-fast test-unit test-dl test-api test-pipeline test-parity \
-	    test-parity-full test-cov \
-	    api-run \
-	    mlflow-ui mlflow-list mlflow-clean \
-	    cache-status cache-clear \
-	    cache-invalidate-eda cache-invalidate-preprocessing \
-	    cache-invalidate-modeling cache-invalidate-forecasting \
-	    cache-invalidate-deeplearning run-force \
-	    docker-build docker-push docker-run \
-	    compose-up compose-pipeline compose-jupyter compose-logs compose-down \
-	    k8s-apply k8s-run-pipeline k8s-status k8s-logs k8s-delete k8s-secret-gen \
-	    dvc-init dvc-remote-add dvc-add-data dvc-pull dvc-push \
-	    dvc-repro dvc-repro-eda dvc-repro-preprocessing dvc-repro-modeling \
-	    dvc-repro-forecasting dvc-repro-deeplearning \
-	    dvc-dag dvc-status dvc-params dvc-metrics dvc-plots dvc-gc dvc-cache-info \
-	    clean clean-all
+.PHONY: help install api-install lint lint-fix format format-check typecheck check \
+        run run-eda run-preprocessing run-modeling run-forecasting run-deeplearning \
+        rerun-eda rerun-preprocessing rerun-modeling rerun-forecasting rerun-deeplearning \
+        test test-fast test-unit test-dl test-api test-pipeline test-parity \
+        test-parity-full test-cov \
+        api-run \
+        mlflow-ui mlflow-list mlflow-register mlflow-registry-status \
+        mlflow-register-classic mlflow-register-dl mlflow-clean \
+        cache-status cache-clear \
+        cache-invalidate-eda cache-invalidate-preprocessing \
+        cache-invalidate-modeling cache-invalidate-forecasting \
+        cache-invalidate-deeplearning run-force \
+        docker-build docker-push docker-run \
+        compose-up compose-pipeline compose-jupyter compose-logs compose-down \
+        k8s-apply k8s-run-pipeline k8s-status k8s-logs k8s-delete k8s-secret-gen \
+        dvc-init dvc-remote-add dvc-add-data dvc-pull dvc-push \
+        dvc-repro dvc-repro-eda dvc-repro-preprocessing dvc-repro-modeling \
+        dvc-repro-forecasting dvc-repro-deeplearning \
+        dvc-dag dvc-status dvc-params dvc-metrics dvc-plots dvc-gc dvc-cache-info \
+        clean clean-all
 
 .DEFAULT_GOAL := help
 
@@ -120,8 +102,9 @@ help:
 	@echo "    make test-cov               Coverage report (no API/pipeline)"
 	@echo ""
 	@echo "  ── CODE QUALITY ─────────────────────────────────────────"
-	@echo "    make lint                   flake8 checks"
-	@echo "    make format                 black + isort auto-format"
+	@echo "    make lint                   ruff check"
+	@echo "    make lint-fix / format       ruff --fix + ruff format"
+	@echo "    make format-check           format check only, no changes"
 	@echo "    make typecheck              mypy static analysis"
 	@echo "    make check                  lint + typecheck + test-fast"
 	@echo ""
@@ -131,6 +114,7 @@ help:
 	@echo "  ── MLFLOW ───────────────────────────────────────────────"
 	@echo "    make mlflow-ui              MLflow UI (port $(MLFLOW_PORT))"
 	@echo "    make mlflow-list            List all experiment runs"
+	@echo "    make mlflow-register        Register best models to registry"
 	@echo "    make mlflow-clean           Delete local mlruns/"
 	@echo ""
 	@echo "  ── DVC ──────────────────────────────────────────────────"
@@ -196,10 +180,10 @@ run: $(CSV_PATH)
 # ── Full pipeline (cache disabled) ───────────────────────────────────────────
 run-force: $(CSV_PATH)
 	@echo "── [run-force] Starting full pipeline (cache disabled)…"
-	$(PYTHON) pipeline.py --csv $(CSV_PATH) --train_until $(TRAIN_UNTIL) --forecast_until $(FORECAST_UNTIL) --force
+	$(SET_MLFLOW) $(PYTHON) pipeline.py --csv $(CSV_PATH) --train_until $(TRAIN_UNTIL) --forecast_until $(FORECAST_UNTIL) --force
 	@echo "✓  Pipeline complete (forced)."
 
-# ── Individual steps ──────────────────────────────────────────────────────────
+# ── Individual steps (respect pipeline cache) ────────────────────────────────
 run-eda: $(CSV_PATH)
 	@echo "── [run-eda] Running EDA step…"
 	$(PYTHON) src/step01_eda.py --csv $(CSV_PATH) --output_dir outputs/eda
@@ -212,7 +196,7 @@ run-preprocessing:
 
 run-modeling:
 	@echo "── [run-modeling] Running modeling step…"
-	$(SET_MLFLOW) $(PYTHON) src/03_modeling.py --input_dir outputs/preprocessing --output_dir outputs/modeling
+	$(SET_MLFLOW) $(PYTHON) src/step03_modeling.py --input_dir outputs/preprocessing --output_dir outputs/modeling
 	@echo "✓  Modeling complete → outputs/modeling/"
 
 run-forecasting:
@@ -222,33 +206,33 @@ run-forecasting:
 
 run-deeplearning:
 	@echo "── [run-deeplearning] Running deep learning step (quick mode)…"
-	$(PYTHON) src/05_deeplearning.py --pre_dir outputs/preprocessing --output_dir outputs/deeplearning --quick
+	$(PYTHON) src/step05_deeplearning.py --pre_dir outputs/preprocessing --output_dir outputs/deeplearning --quick
 	@echo "✓  Deep learning complete → outputs/deeplearning/"
 
-# ── Re-run steps (always executes, no cache check) ───────────────────────────
+# ── Re-run steps (always executes, bypasses pipeline cache) ─────────────────
 rerun-eda:
 	@echo "── [rerun-eda] Re-running EDA (cache bypassed)…"
-	$(PYTHON) src/01_eda.py --csv $(CSV_PATH) --output_dir outputs/eda
+	$(PYTHON) src/step01_eda.py --csv $(CSV_PATH) --output_dir outputs/eda
 	@echo "✓  EDA complete → outputs/eda/"
 
 rerun-preprocessing:
 	@echo "── [rerun-preprocessing] Re-running preprocessing (cache bypassed)…"
-	$(PYTHON) src/02_preprocessing.py --input_dir outputs/eda --output_dir outputs/preprocessing --train_until $(TRAIN_UNTIL)
+	$(PYTHON) src/step02_preprocessing.py --input_dir outputs/eda --output_dir outputs/preprocessing --train_until $(TRAIN_UNTIL)
 	@echo "✓  Preprocessing complete → outputs/preprocessing/"
 
 rerun-modeling:
 	@echo "── [rerun-modeling] Re-running modeling…"
-	$(PYTHON) src/03_modeling.py --input_dir outputs/preprocessing --output_dir outputs/modeling
+	$(SET_MLFLOW) $(PYTHON) src/step03_modeling.py --input_dir outputs/preprocessing --output_dir outputs/modeling
 	@echo "✓  Modeling complete → outputs/modeling/"
 
 rerun-forecasting:
 	@echo "── [rerun-forecasting] Re-running forecasting…"
-	$(PYTHON) src/04_forecasting.py --pre_dir outputs/preprocessing --model_dir outputs/modeling --output_dir outputs/forecasting --forecast_until $(FORECAST_UNTIL)
+	$(SET_MLFLOW) $(PYTHON) src/step04_forecasting.py --pre_dir outputs/preprocessing --model_dir outputs/modeling --output_dir outputs/forecasting --forecast_until $(FORECAST_UNTIL)
 	@echo "✓  Forecasting complete → outputs/forecasting/"
 
 rerun-deeplearning:
 	@echo "── [rerun-deeplearning] Re-running deep learning (full epochs)…"
-	$(PYTHON) src/05_deeplearning.py --pre_dir outputs/preprocessing --output_dir outputs/deeplearning
+	$(PYTHON) src/step05_deeplearning.py --pre_dir outputs/preprocessing --output_dir outputs/deeplearning
 	@echo "✓  Deep learning complete → outputs/deeplearning/"
 
 # =============================================================================
@@ -404,6 +388,7 @@ mlflow-list:
 	@echo "── [mlflow-list] Listing runs in experiment 'ember-demand-forecasting'…"
 	mlflow runs list --experiment-name ember-demand-forecasting
 	@echo "✓  Run list complete."
+
 mlflow-register:
 	@echo "── [mlflow-register] Registering best models to MLflow Registry…"
 	$(PYTHON) src/register_models.py --model_dir outputs/modeling --pre_dir outputs/preprocessing --dl_dir outputs/deeplearning
@@ -425,7 +410,7 @@ mlflow-register-dl:
 
 mlflow-clean:
 	@echo "── [mlflow-clean] Deleting local mlruns/ directory…"
-	$(PYTHON) -c "import shutil; shutil.rmtree('mlruns', ignore_errors=True)"
+	$(RM) mlruns/
 	@echo "✓  mlruns/ removed."
 
 # =============================================================================
@@ -521,11 +506,10 @@ dvc-gc:
 
 dvc-cache-info:
 	@echo "── [dvc-cache-info] Local DVC cache size:"
-ifdef IS_WIN
-	if (Test-Path .dvc/cache) { (Get-ChildItem .dvc/cache -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB } else { Write-Host "No local cache yet." }
-else
-	du -sh .dvc/cache $(DEVNULL) || echo "No local cache yet."
-endif
+	$(PYTHON) -c "import os; \
+p='.dvc/cache'; \
+total=sum(os.path.getsize(os.path.join(r,f)) for r,_,fs in os.walk(p) for f in fs) if os.path.isdir(p) else 0; \
+print(f'{total/1e6:.1f} MB' if total else 'No local cache yet.')"
 
 # =============================================================================
 # DOCKER
@@ -550,7 +534,13 @@ docker-push: docker-build
 
 docker-run: $(CSV_PATH)
 	@echo "── [docker-run] Running pipeline inside Docker container…"
-	docker run --rm -e MLFLOW_TRACKING_URI=http://host.docker.internal:$(MLFLOW_PORT) -v $(PWD)/data:/app/data:ro -v $(PWD)/outputs:/app/outputs -v $(PWD)/mlruns:/app/mlruns $(IMAGE_NAME):$(IMAGE_TAG) --csv /app/$(CSV_PATH) --train_until $(TRAIN_UNTIL) --forecast_until $(FORECAST_UNTIL)
+	docker run --rm \
+	  -e MLFLOW_TRACKING_URI=http://host.docker.internal:$(MLFLOW_PORT) \
+	  -v $(PWD)/data:/app/data:ro \
+	  -v $(PWD)/outputs:/app/outputs \
+	  -v $(PWD)/mlruns:/app/mlruns \
+	  $(IMAGE_NAME):$(IMAGE_TAG) \
+	  --csv /app/$(CSV_PATH) --train_until $(TRAIN_UNTIL) --forecast_until $(FORECAST_UNTIL)
 	@echo "✓  Pipeline container finished."
 
 # =============================================================================
@@ -637,17 +627,10 @@ clean:
 
 clean-all: clean mlflow-clean
 	@echo "── [clean-all] Removing Python cache files and temp directories…"
-ifdef IS_WIN
-	Get-ChildItem -Recurse -Filter "__pycache__" -Directory | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-	Get-ChildItem -Recurse -Filter "*.pyc" | Remove-Item -Force -ErrorAction SilentlyContinue
-	Get-ChildItem -Recurse -Filter ".ipynb_checkpoints" -Directory | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-	Remove-Item -Recurse -Force .cache/ -ErrorAction SilentlyContinue
-else
-	find . -type d -name __pycache__ -exec rm -rf {} + $(DEVNULL) || true
-	find . -name "*.pyc" -delete $(DEVNULL) || true
-	find . -name ".ipynb_checkpoints" -exec rm -rf {} + $(DEVNULL) || true
-	$(RM) .cache/ $(DEVNULL) || true
-endif
+	$(PYTHON) -c "import os,shutil; \
+[shutil.rmtree(os.path.join(r,d), ignore_errors=True) for r,ds,_ in os.walk('.') for d in list(ds) if d in ('__pycache__','.ipynb_checkpoints')]; \
+[os.remove(os.path.join(r,f)) for r,_,fs in os.walk('.') for f in fs if f.endswith('.pyc')]"
+	$(RM) .cache/
 	@echo "✓  Full cleanup complete."
 
 # =============================================================================

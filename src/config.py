@@ -13,6 +13,24 @@ Import anywhere:
 from __future__ import annotations
 
 import os
+import tempfile
+
+# ── Windows home/cache-dir fix ────────────────────────────────────────────────
+# pathlib.Path.home() on Windows does NOT check HOME — it checks USERPROFILE,
+# then HOMEDRIVE+HOMEPATH. parso (pulled in by seaborn -> ipywidgets -> IPython
+# -> jedi -> parso) additionally checks LOCALAPPDATA before ever calling
+# Path.home(). In this environment one or more of these vars isn't reaching
+# the Python subprocess, so we backstop all of them with a guaranteed-valid
+# temp directory before any heavy import happens anywhere downstream.
+if os.name == "nt":
+    _fallback_dir = tempfile.gettempdir()
+    os.environ.setdefault("USERPROFILE", _fallback_dir)
+    os.environ.setdefault("LOCALAPPDATA", _fallback_dir)
+    os.environ.setdefault("HOMEDRIVE", os.path.splitdrive(_fallback_dir)[0] or "C:")
+    os.environ.setdefault("HOMEPATH", os.path.splitdrive(_fallback_dir)[1] or "\\Temp")
+    os.environ.setdefault("HOME", _fallback_dir)
+    os.environ.setdefault("MPLCONFIGDIR", os.path.join(_fallback_dir, "mplcache"))
+
 from dataclasses import dataclass, field
 
 

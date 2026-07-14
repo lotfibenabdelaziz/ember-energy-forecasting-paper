@@ -86,4 +86,5 @@ logs/
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 .pytest_cache/
-.mypy_cache/
+.mypy_cache/"" 
+".mplconfig/" 

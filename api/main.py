@@ -68,6 +68,7 @@ log = logging.getLogger(__name__)
 _ROOT = Path(os.getenv("OUTPUT_ROOT", os.getenv("OUTPUTS_DIR", "outputs")))
 
 FORECAST_CSV = _ROOT / "forecasting" / "demand_forecast_2025_2030.csv"
+ALL_MODELS_FORECAST_CSV = _ROOT / "forecasting" / "all_models_forecast.csv"
 METRICS_CSV = _ROOT / "modeling" / "test_benchmarking.csv"
 GROWTH_CSV = _ROOT / "forecasting" / "demand_growth_summary.csv"
 BEST_MODELS_CSV = _ROOT / "modeling" / "best_models.csv"
@@ -76,6 +77,8 @@ DL_FORECAST_CSV = _ROOT / "deeplearning" / "dl_forecast_2025_2030.csv"
 DL_METRICS_CSV = _ROOT / "deeplearning" / "dl_benchmarking.csv"
 DL_BEST_CSV  = _ROOT / "deeplearning" / "dl_best_models.csv"
 HISTORY_CSV  = _ROOT / "preprocessing" / "ember_model_ready.csv"
+SUBCATEGORY_CSV   = _ROOT / "eda" / "ember_filtered.csv"
+SUMMARY_STATS_CSV = _ROOT / "eda" / "table01_eda_statistics.csv"
 
 FIGURES_DIRS = [
     _ROOT / "eda" / "figures",
@@ -108,6 +111,7 @@ def _load(path: Path, label: str) -> pd.DataFrame:
 def _load_all() -> dict[str, pd.DataFrame]:
     return {
         "forecast": _load(FORECAST_CSV, "forecast"),
+        "all_models_forecast": _load(ALL_MODELS_FORECAST_CSV, "all_models_forecast"),
         "metrics": _load(METRICS_CSV, "metrics"),
         "growth": _load(GROWTH_CSV, "growth"),
         "best_models": _load(BEST_MODELS_CSV, "best_models"),
@@ -116,6 +120,8 @@ def _load_all() -> dict[str, pd.DataFrame]:
         "dl_metrics": _load(DL_METRICS_CSV, "dl_metrics"),
         "dl_best":  _load(DL_BEST_CSV,  "dl_best"),
         "history":  _load(HISTORY_CSV,  "history"),
+        "subcategories": _load(SUBCATEGORY_CSV, "subcategories"),
+        "summary_stats": _load(SUMMARY_STATS_CSV, "summary_stats"),
     }
 
 
@@ -417,6 +423,118 @@ def get_history(country: str) -> dict:
         "demand_twh": [round(float(v), 3) for v in sub["Demand"].tolist()],
         "events":     events,
     }
+
+# ── Data Overview (presentation) ──────────────────────────────────────────────
+
+# Subcategories with a single clean value per country-year (safe to chart
+# directly). "Aggregate fuel" is excluded — it mixes THREE different units
+# (GW, %, TWh) under the same Subcategory label, so summing/averaging it
+# would be meaningless. "Fuel" IS summed below (see FUEL_SUBCAT) since its
+# rows are all in a consistent unit (GW) — summing gives total generation
+# capacity across fuel-type components.
+CLEAN_SUBCATS = ["Demand", "CO2 intensity", "Demand per capita", "Electricity imports"]
+FUEL_SUBCAT = "Fuel"  # aggregated via sum(), not mean() — see get_subcategories_all()
+
+
+@app.get("/data/demand-history", tags=["data"], dependencies=[Depends(get_current_user)])
+def get_demand_history_all() -> dict:
+    """Electricity demand 2000-2024 for ALL 7 countries — one chart, all lines."""
+    df = _require(_DATA["history"], "History")
+    series = {}
+    for country in COUNTRIES:
+        sub = df[df["Area"] == country].sort_values("Year")
+        if sub.empty:
+            continue
+        series[country] = {
+            "years": sub["Year"].tolist(),
+            "demand_twh": [round(float(v), 3) for v in sub["Demand"].tolist()],
+        }
+    return {"countries": series}
+
+
+@app.get("/data/subcategories", tags=["data"], dependencies=[Depends(get_current_user)])
+def get_subcategories_all() -> dict:
+    """
+    Each clean subcategory (CO2 intensity, Demand per capita,
+    Electricity imports, Demand) as its own time series per country —
+    powers small-multiple charts comparing all 7 countries per metric.
+    """
+    df = _require(_DATA["subcategories"], "Subcategories")
+    result: dict[str, Any] = {}
+    for subcat in CLEAN_SUBCATS:
+        sub_df = df[df["Subcategory"] == subcat]
+        if sub_df.empty:
+            continue
+        unit = sub_df["Unit"].iloc[0] if "Unit" in sub_df.columns else ""
+        countries_data = {}
+        for country in COUNTRIES:
+            c_sub = (
+                sub_df[sub_df["Area"] == country]
+                .groupby("Year", as_index=False)["Value"].mean()
+                .sort_values("Year")
+            )
+            if c_sub.empty:
+                continue
+            countries_data[country] = {
+                "years": c_sub["Year"].tolist(),
+                "values": [round(float(v), 3) if pd.notna(v) else None for v in c_sub["Value"].tolist()],
+            }
+        result[subcat] = {"unit": unit, "countries": countries_data}
+
+    # Fuel — summed (not averaged) per country-year, since its rows are all
+    # in GW and represent generation-mix components without a type label.
+    # Sum = total generation capacity across those unlabelled components.
+    fuel_df = df[df["Subcategory"] == FUEL_SUBCAT]
+    if not fuel_df.empty:
+        unit = fuel_df["Unit"].iloc[0] if "Unit" in fuel_df.columns else "GW"
+        countries_data = {}
+        for country in COUNTRIES:
+            c_sub = (
+                fuel_df[fuel_df["Area"] == country]
+                .groupby("Year", as_index=False)["Value"].sum()
+                .sort_values("Year")
+            )
+            if c_sub.empty:
+                continue
+            countries_data[country] = {
+                "years": c_sub["Year"].tolist(),
+                "values": [round(float(v), 3) if pd.notna(v) else None for v in c_sub["Value"].tolist()],
+            }
+        result["Total Generation Capacity"] = {"unit": unit, "countries": countries_data}
+    return {"subcategories": result}
+
+
+@app.get("/data/summary", tags=["data"], dependencies=[Depends(get_current_user)])
+def get_summary_stats() -> dict:
+    """Pre-computed 2000 vs 2024 summary statistics per country (EDA table01)."""
+    df = _require(_DATA["summary_stats"], "Summary statistics")
+    return {"rows": df.to_dict(orient="records")}
+
+
+@app.get("/forecast/all/{country}", tags=["forecast"], dependencies=[Depends(get_current_user)])
+def get_all_models_forecast(country: str) -> dict:
+    """
+    Point forecast (2025-2030) for EVERY classical model — not just the
+    winner. Lets the dashboard overlay all 11 models on one chart to
+    visualise divergence between short-horizon (1-step) test accuracy
+    and long-horizon (6-step recursive) forecast stability.
+    """
+    country = _validate_country(country)
+    df = _require(_DATA["all_models_forecast"], "All-models forecast")
+    sub = df[df["Country"] == country]
+    if sub.empty:
+        raise HTTPException(404, f"No all-models forecast data for {country}")
+
+    series = {}
+    for model_name, grp in sub.groupby("Model"):
+        grp = grp.sort_values("Year")
+        series[model_name] = {
+            "years": grp["Year"].tolist(),
+            "forecast_twh": [round(float(v), 3) for v in grp["Forecast"].tolist()],
+        }
+
+    return {"country": country, "models": series}
+
 
 @app.get("/metrics/{country}", tags=["metrics"], dependencies=[Depends(get_current_user)])
 def get_metrics(country: str) -> dict:

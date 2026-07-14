@@ -52,6 +52,20 @@ def arima_1step(train_series: pd.Series) -> float:
         return train_series.iloc[-1]
 
 
+def theta_1step(train_series: pd.Series) -> float:
+    """
+    Theta method — M3/M4 competition winner for annual/low-frequency series.
+    Decomposes into trend (θ=2) + level component, then recombines.
+    1-step forecast.
+    """
+    try:
+        from statsmodels.tsa.forecasting.theta import ThetaModel
+        m = ThetaModel(train_series.values, period=1).fit(use_mle=True)
+        return float(m.forecast(1).iloc[0])
+    except Exception:
+        return train_series.iloc[-1]
+
+
 def ml_1step(
     train_df: pd.DataFrame,
     test_row: pd.Series,
@@ -86,3 +100,61 @@ def ml_1step(
         x_pred = scaler.transform(x_pred)
 
     return float(model.predict(x_pred)[0])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Additional models — chosen from observed failure patterns:
+#   Germany/France: structural decline → needs forced damping (not auto-φ Holt)
+#   Kuwait:         cooling-load seasonality → needs a seasonal AR component
+#   Small samples:  Theta (M3/M4-proven for short series) adds real diversity
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def theta_1step(ts: pd.Series) -> float:
+    """
+    Theta method — M3/M4 competition winner.
+    Decomposes series into trend + cycle component.
+    Good structural alternative to Ridge/ARIMA for short annual series (n~17-25).
+    """
+    try:
+        from statsmodels.tsa.forecasting.theta import ThetaModel
+        m = ThetaModel(ts.values, period=1).fit(use_mle=True)
+        return float(m.forecast(1).iloc[0])
+    except Exception:
+        return float(ts.iloc[-1])
+
+
+def damped_holt_strong_1step(ts: pd.Series) -> float:
+    """
+    Holt with explicit strong damping φ=0.85.
+    Standard Holt auto-optimizes φ — sometimes picks φ≈1 (no damping), which
+    is exactly what caused Germany/France's Ridge/Holt over-extrapolation
+    during forecast (structural demand decline needs forced damping).
+    """
+    try:
+        m = ExponentialSmoothing(
+            ts.values, trend="add", damped_trend=True
+        ).fit(optimized=True, damping_trend=0.85)
+        return float(m.forecast(1).iloc[0])
+    except Exception:
+        return float(ts.iloc[-1])
+
+
+def sarima_1step(ts: pd.Series) -> float:
+    """
+    SARIMA(1,1,1)(1,0,1,1) — seasonal ARIMA.
+    Kuwait's demand is cooling-load driven (Gulf-state AC demand) — a
+    seasonal AR component fits that physical pattern better than pure trend.
+    Falls back to ARIMA(1,1,1) if seasonal fit fails.
+    """
+    try:
+        from statsmodels.tsa.statespace.sarimax import SARIMAX
+        m = SARIMAX(
+            ts.values,
+            order=(1, 1, 1),
+            seasonal_order=(1, 0, 1, 1),
+            enforce_stationarity=False,
+            enforce_invertibility=False,
+        ).fit(disp=False, maxiter=200)
+        return float(m.forecast(1).iloc[0])
+    except Exception:
+        return arima_1step(ts)

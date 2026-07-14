@@ -10,7 +10,7 @@ from sklearn.preprocessing import StandardScaler
 
 from src.forecasting.forecasters import clean_x, extrapolate_exog, forecast_statistical
 
-STAT_MODELS = {"Naive", "Naïve", "LinearTrend", "Holt", "ARIMA(1,1,1)", "ARIMA_1_1_1"}
+STAT_MODELS = {"Naive", "Naïve", "LinearTrend", "Holt", "DampedHolt", "ARIMA(1,1,1)", "ARIMA_1_1_1", "SARIMA", "Theta"}
 
 
 def _build_future_row(
@@ -27,14 +27,16 @@ def _build_future_row(
     row: dict[str, float] = {}
 
     for lag in [1, 2, 3]:
-        k   = f"{target}_lag{lag}"
-        idx = n - lag
-        row[k] = full_demand[idx] if idx >= 0 else np.nan  # always set
+        k = f"{target}_lag{lag}"
+        if k in all_feature_cols:
+            idx = n - lag
+            row[k] = full_demand[idx] if idx >= 0 else np.nan
 
     for w in [3, 5]:
-        k      = f"{target}_ma{w}"
-        window = full_demand[max(0, n - w) : n]
-        row[k] = float(np.mean(window)) if window else np.nan  # always set
+        k = f"{target}_ma{w}"
+        if k in all_feature_cols:
+            window = full_demand[max(0, n - w) : n]
+            row[k] = float(np.mean(window)) if window else np.nan
 
     k = f"{target}_yoy"
     if k in all_feature_cols:

@@ -24,9 +24,6 @@ Writes:  outputs/forecasting/demand_forecast_2025_2030.csv
 
 from __future__ import annotations
 
-import sys as _sys, os as _os
-_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-
 import argparse
 import json
 import logging
@@ -36,16 +33,13 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from src.config import cfg
 from src.forecasting.forecasters import (
-    bootstrap_forecast_ci,
-    get_ml_cls_map,
+    bootstrap_forecast_ci, get_ml_cls_map,
 )
+from src.forecasting.recursive import point_forecast
 from src.forecasting.growth import compute_growth_summary
 from src.forecasting.plots import (
-    plot_forecast_overlay,
-    plot_forecast_per_country,
-    plot_growth_uncertainty,
+    plot_forecast_per_country, plot_forecast_overlay, plot_growth_uncertainty,
 )
 
 warnings.filterwarnings("ignore")
@@ -57,24 +51,82 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-COUNTRIES = cfg.countries
-TARGET = cfg.target
+COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
+TARGET    = "Demand"
 
 STAT_MODELS = {"Naive", "Naïve", "LinearTrend", "Holt", "ARIMA(1,1,1)", "ARIMA_1_1_1"}
 
 
+def generate_all_models_forecast(
+    df:             pd.DataFrame,
+    all_features:   list[str],
+    raw_features:   list[str],
+    forecast_years: list[int],
+    target:         str,
+    params_map:     dict,
+    ml_cls_map:     dict,
+    model_names:    list[str],
+) -> pd.DataFrame:
+    """
+    Generate a POINT forecast (no bootstrap CI) for every model on every
+    country — used purely for the "all models on one plot" dashboard
+    comparison, to visualise why some models (Ridge in particular) score
+    well on 1-step walk-forward MAPE yet diverge badly on the recursive
+    6-step 2025-2030 forecast. Skips CI to stay fast (11 models x 7
+    countries would be far too slow with 200-iteration bootstrap each).
+    """
+    from src.forecasting.recursive import point_forecast
+
+    horizon = len(forecast_years)
+    rows: list[dict] = []
+
+    for country in COUNTRIES:
+        hist_df    = df[df["Area"] == country].sort_values("Year").reset_index(drop=True)
+        last_known = float(hist_df[target].values[-1])
+
+        for model_name in model_names:
+            params = params_map.get(model_name, {})
+            try:
+                fc = point_forecast(
+                    hist_df, model_name, all_features, raw_features,
+                    params, horizon, target, ml_cls_map,
+                )
+            except Exception as e:
+                log.debug("  %s/%s failed: %s", country, model_name, e)
+                continue
+
+            # ── Sanity clamp — same philosophy as bootstrap_forecast_ci's
+            # 25% fallback, applied here so one recursively-diverging model
+            # (e.g. negative demand) can't blow out the shared chart axis
+            # that all 11 models are plotted on together.
+            fc = np.asarray(fc, dtype=float)
+            if last_known != 0:
+                for i in range(len(fc)):
+                    band = abs(last_known) * (0.40 + 0.10 * i)  # grows with horizon
+                    fc[i] = np.clip(fc[i], last_known - band, last_known + band)
+
+            for i, yr in enumerate(forecast_years):
+                rows.append({
+                    "Country": country,
+                    "Model":   model_name,
+                    "Year":    yr,
+                    "Forecast": round(float(fc[i]), 2),
+                })
+
+    return pd.DataFrame(rows)
+
+
 # ── Generate forecasts for all countries (with fallback chain) ───────────────
 
-
 def generate_all_forecasts(
-    df: pd.DataFrame,
-    best_df: pd.DataFrame,
-    all_features: list[str],
-    raw_features: list[str],
+    df:             pd.DataFrame,
+    best_df:        pd.DataFrame,
+    all_features:   list[str],
+    raw_features:   list[str],
     forecast_years: list[int],
-    target: str,
-    params_map: dict,
-    ml_cls_map: dict,
+    target:         str,
+    params_map:     dict,
+    ml_cls_map:     dict,
 ) -> tuple[pd.DataFrame, dict]:
     """
     Generate forecasts for all countries with fallback chain:
@@ -85,13 +137,13 @@ def generate_all_forecasts(
     model_used: dict[str, str] = {}
 
     for country in COUNTRIES:
-        hist_df = df[df["Area"] == country].sort_values("Year").reset_index(drop=True)
-        best_row = best_df[best_df["Country"] == country]
+        hist_df    = df[df["Area"] == country].sort_values("Year").reset_index(drop=True)
+        best_row   = best_df[best_df["Country"] == country]
         if best_row.empty:
             log.warning("No best model for %s — skipping", country)
             continue
         best_model = best_row["Model"].values[0]
-        params = params_map.get(best_model, {})
+        params     = params_map.get(best_model, {})
 
         log.info("  %-10s | %-16s ...", country, best_model)
 
@@ -100,72 +152,39 @@ def generate_all_forecasts(
 
         try:
             fc, lo, hi = bootstrap_forecast_ci(
-                hist_df,
-                best_model,
-                all_features,
-                raw_features,
-                params,
-                horizon,
-                target,
-                ml_cls_map,
+                hist_df, best_model, all_features, raw_features, params,
+                horizon, target, ml_cls_map,
             )
-
-            # ── Sanity check — fallback if first-year jump > 25% ─────────────
-            last_known  = float(hist_df[target].values[-1])
-            deviation   = abs(fc[0] - last_known) / max(abs(last_known), 1e-6)
-            if deviation > 0.25:
-                log.warning(
-                    "  %s: %s forecast deviates %.1f%% from last known (%.1f→%.1f TWh)"
-                    " — switching to LinearTrend fallback",
-                    country, best_model, deviation * 100, last_known, fc[0],
-                )
-                from src.forecasting.forecasters import forecast_statistical
-                ts       = hist_df[target].values.astype(float)
-                fc       = forecast_statistical(ts, "LinearTrend", horizon)
-                std      = np.std(ts[-8:]) * 0.10
-                lo       = fc - 1.645 * std
-                hi       = fc + 1.645 * std
-                used_model = f"LinearTrend (fallback from {best_model})"
-
         except Exception as e1:
             log.warning("    Best model failed: %s: %s", type(e1).__name__, e1)
             log.info("    Trying Holt fallback...")
             try:
                 fc, lo, hi = bootstrap_forecast_ci(
-                    hist_df,
-                    "Holt",
-                    all_features,
-                    raw_features,
-                    {},
-                    horizon,
-                    target,
-                    ml_cls_map,
+                    hist_df, "Holt", all_features, raw_features, {},
+                    horizon, target, ml_cls_map,
                 )
                 used_model = "Holt (fallback)"
             except Exception as e2:
                 log.warning("    Holt failed too: %s", e2)
                 from src.forecasting.forecasters import forecast_statistical
-
-                ts = hist_df[target].values.astype(float)
-                fc = forecast_statistical(ts, "LinearTrend", horizon)
+                ts  = hist_df[target].values.astype(float)
+                fc  = forecast_statistical(ts, "LinearTrend", horizon)
                 std = np.std(ts) * 0.10
-                lo = fc - 1.645 * std
-                hi = fc + 1.645 * std
+                lo  = fc - 1.645 * std
+                hi  = fc + 1.645 * std
                 used_model = "LinearTrend (last resort)"
 
         model_used[country] = used_model
 
         for i, yr in enumerate(forecast_years):
-            fc_records.append(
-                {
-                    "Country": country,
-                    "Year": yr,
-                    "Forecast": round(float(fc[i]), 2),
-                    "Lower_90": round(float(lo[i]), 2),
-                    "Upper_90": round(float(hi[i]), 2),
-                    "Model": used_model,
-                }
-            )
+            fc_records.append({
+                "Country":  country,
+                "Year":     yr,
+                "Forecast": round(float(fc[i]), 2),
+                "Lower_90": round(float(lo[i]), 2),
+                "Upper_90": round(float(hi[i]), 2),
+                "Model":    used_model,
+            })
 
     fc_df = pd.DataFrame(fc_records)
 
@@ -178,53 +197,32 @@ def generate_all_forecasts(
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
-
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Ember forecasting step")
-    p.add_argument("--pre_dir", default="outputs/preprocessing", help="Preprocessing dir")
-    p.add_argument("--model_dir", default="outputs/modeling", help="Modeling dir")
-    p.add_argument("--output_dir", default="outputs/forecasting", help="Output dir")
-    p.add_argument("--forecast_until", type=int, default=cfg.forecast_end, help="Last forecast year")
+    p.add_argument("--pre_dir",        default="outputs/preprocessing", help="Preprocessing dir")
+    p.add_argument("--model_dir",      default="outputs/modeling",      help="Modeling dir")
+    p.add_argument("--output_dir",     default="outputs/forecasting",   help="Output dir")
+    p.add_argument("--forecast_until", type=int, default=2030,          help="Last forecast year")
     return p.parse_args()
 
 
 def main() -> None:
-    args = parse_args()
+    args    = parse_args()
     fig_dir = os.path.join(args.output_dir, "figures")
     os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(fig_dir, exist_ok=True)
+    os.makedirs(fig_dir,         exist_ok=True)
 
-    forecast_years = list(range(cfg.forecast_start, args.forecast_until + 1))
+    forecast_years = list(range(2025, args.forecast_until + 1))
 
     # Load
-    df = pd.read_csv(os.path.join(args.pre_dir, "ember_model_ready.csv"))
+    df      = pd.read_csv(os.path.join(args.pre_dir, "ember_model_ready.csv"))
     best_df = pd.read_csv(os.path.join(args.model_dir, "best_models.csv"))
     with open(os.path.join(args.pre_dir, "feature_meta.json")) as f:
         meta = json.load(f)
 
     all_features = meta["all_features"]
-
-    # For the FINAL refit (used for 2025-2030 forecast only):
-    # Add Demand lag/MA cols — excluded from walk-forward training to prevent
-    # leakage, but valid for final refit since we train on ALL history
-    # and predict genuinely unknown future years.
-    demand_lag_cols = [
-        f"{TARGET}_lag1", f"{TARGET}_lag2", f"{TARGET}_lag3",
-        f"{TARGET}_ma3",  f"{TARGET}_ma5",
-    ]
-    forecast_features = [
-        c for c in df.columns
-        if c not in ["Area", "Year"]
-        and c != TARGET
-    ]
-    log.info(
-        "Walk-forward features: %d | Final refit features: %d",
-        len(all_features), len(forecast_features),
-    )
-    train_end    = meta.get("TRAIN_END", cfg.train_end)
-    val_end      = meta.get("VAL_END",   cfg.val_end)
-    test_end     = meta.get("TEST_END",  cfg.test_end)
-
+    # Fallback: raw_features may be missing from stale feature_meta.json
+    # Re-run: python pipeline.py --invalidate preprocessing
     raw_features = meta.get("raw_features", meta.get("FEATURES", []))
 
     log.info("Data: %s", df.shape)
@@ -232,22 +230,15 @@ def main() -> None:
 
     # Load tuned hyperparameters
     params_map = {
-        "Ridge": {"alpha": 1.0},
+        "Ridge":        {"alpha": 1.0},
+        "ElasticNet":   {"alpha": 0.1, "l1_ratio": 0.5, "max_iter": 5000},
+        "BayesianRidge": {"max_iter": 500},
         "RandomForest": {"n_estimators": 100, "random_state": 42, "n_jobs": -1},
-        "XGBoost": {
-            "n_estimators": 100,
-            "learning_rate": 0.1,
-            "max_depth": 3,
-            "tree_method": "hist",
-            "verbosity": 0,
-            "random_state": 42,
-        },
-        "Holt": {},
-        "ARIMA(1,1,1)": {},
-        "ARIMA_1_1_1": {},
-        "LinearTrend": {},
-        "Naive": {},
-        "Naïve": {},
+        "XGBoost":      {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3,
+                         "tree_method": "hist", "verbosity": 0, "random_state": 42},
+        "Holt": {}, "DampedHolt": {}, "ARIMA(1,1,1)": {}, "ARIMA_1_1_1": {},
+        "SARIMA": {}, "Theta": {},
+        "LinearTrend": {}, "Naive": {}, "Naïve": {},
     }
     best_hp_path = os.path.join(args.model_dir, "best_hp.json")
     if os.path.exists(best_hp_path):
@@ -262,24 +253,16 @@ def main() -> None:
     ml_cls_map = get_ml_cls_map()
 
     # Generate forecasts
-    log.info(
-        "── Generating forecasts for %d countries x %d years…", len(COUNTRIES), len(forecast_years)
-    )
-    fc_df, _model_used = generate_all_forecasts(
-        df,
-        best_df,
-        forecast_features,   # includes Demand_lag1/2/3 for recursive step
-        raw_features,
-        forecast_years,
-        TARGET,
-        params_map,
-        ml_cls_map,
+    log.info("── Generating forecasts for %d countries x %d years…",
+             len(COUNTRIES), len(forecast_years))
+    fc_df, model_used = generate_all_forecasts(
+        df, best_df, all_features, raw_features, forecast_years,
+        TARGET, params_map, ml_cls_map,
     )
     log.info("Forecast table: %s", fc_df.shape)
 
     # Plots
-    plot_forecast_per_country(df, fc_df, TARGET, fig_dir,
-        train_end=train_end, val_end=val_end, test_end=test_end)
+    plot_forecast_per_country(df, fc_df, TARGET, fig_dir)
     plot_forecast_overlay(df, fc_df, TARGET, fig_dir)
 
     # Growth summary
@@ -288,13 +271,24 @@ def main() -> None:
 
     plot_growth_uncertainty(fc_df, growth_df, fig_dir)
 
+    # ── All-models forecast (point estimate only) — for dashboard comparison ──
+    log.info("── Generating point forecast for ALL models (dashboard comparison)…")
+    all_model_names = list(params_map.keys())
+    all_models_df = generate_all_models_forecast(
+        df, all_features, raw_features, forecast_years,
+        TARGET, params_map, ml_cls_map, all_model_names,
+    )
+    all_models_df.to_csv(os.path.join(args.output_dir, "all_models_forecast.csv"), index=False)
+    log.info("All-models forecast table: %s", all_models_df.shape)
+
     # Export
-    fc_df.to_csv(os.path.join(args.output_dir, f"demand_forecast_{cfg.forecast_start}_{cfg.forecast_end}.csv"), index=False)
+    fc_df.to_csv(os.path.join(args.output_dir, "demand_forecast_2025_2030.csv"), index=False)
     growth_df.to_csv(os.path.join(args.output_dir, "demand_growth_summary.csv"), index=False)
 
     log.info("=== Forecasting Complete ===")
     log.info("  demand_forecast_2025_2030.csv : %s", fc_df.shape)
     log.info("  demand_growth_summary.csv     : %s", growth_df.shape)
+    log.info("  all_models_forecast.csv       : %s", all_models_df.shape)
     log.info("  Saved → %s", args.output_dir)
 
 

@@ -14,8 +14,6 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-
-from src.config import cfg
 import pandas as pd
 import torch
 
@@ -219,11 +217,9 @@ def growth_summary(
     df_forecast: pd.DataFrame,
     df_hist: pd.DataFrame,
     countries: list[str],
-    base_year: int | None = None,
-    target_year: int | None = None,
+    base_year: int = 2024,
+    target_year: int = 2030,
 ) -> pd.DataFrame:
-    base_year   = base_year   if base_year   is not None else cfg.test_end
-    target_year = target_year if target_year is not None else cfg.forecast_end
     """
     CAGR + total growth from base_year (last historical) to target_year (forecast).
 
@@ -240,7 +236,7 @@ def growth_summary(
     n_years = target_year - base_year
 
     for country in countries:
-        hist_val = df_hist[(df_hist["Area"] == country) & (df_hist["Year"] == base_year)][cfg.target]
+        hist_val = df_hist[(df_hist["Area"] == country) & (df_hist["Year"] == base_year)]["Demand"]
         if hist_val.empty:
             continue
         base_val = float(hist_val.values[0])

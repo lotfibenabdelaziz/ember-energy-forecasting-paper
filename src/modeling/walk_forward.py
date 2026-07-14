@@ -11,15 +11,14 @@ from __future__ import annotations
 
 import logging
 
-from src.config import cfg
-
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import BayesianRidge, ElasticNet, Ridge
 from sklearn.preprocessing import StandardScaler
 
 from src.modeling.forecasters import (
-    arima_1step, holt_1step, linear_trend_1step, ml_1step, naive_1step,
+    arima_1step, damped_holt_strong_1step, holt_1step, linear_trend_1step,
+    ml_1step, naive_1step, sarima_1step, theta_1step,
 )
 
 try:
@@ -30,7 +29,7 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
-COUNTRIES = cfg.countries
+COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
 
 
 def walk_forward_evaluate(
@@ -45,14 +44,16 @@ def walk_forward_evaluate(
 
     For each (country, year):
       1. Train on all data strictly before `year`
-      2. Predict `year` with 7 models: Naive, LinearTrend, Holt,
-         ARIMA(1,1,1), Ridge, RandomForest, XGBoost
+      2. Predict `year` with 11 models: Naive, LinearTrend, Holt, DampedHolt,
+         Theta, ARIMA(1,1,1), SARIMA, Ridge, ElasticNet, BayesianRidge,
+         RandomForest, XGBoost
       3. Record actual vs predicted
 
     Returns long-format DataFrame:
         [Country, Year, Model, y_actual, y_pred, error, abs_pct_error]
     """
     best_ridge_alpha = best_hp["Ridge"]["alpha"]
+    best_en_params    = best_hp.get("ElasticNet", {"alpha": 0.1, "l1_ratio": 0.5})
     best_rf_params    = best_hp["RandomForest"]
     best_xgb_params   = best_hp["XGBoost"]
 
@@ -75,7 +76,10 @@ def walk_forward_evaluate(
             preds["Naive"]       = naive_1step(train_series)
             preds["LinearTrend"] = linear_trend_1step(train_series)
             preds["Holt"]        = holt_1step(train_series)
+            preds["DampedHolt"]  = damped_holt_strong_1step(train_series)
             preds["ARIMA_1_1_1"] = arima_1step(train_series)
+            preds["SARIMA"]      = sarima_1step(train_series)
+            preds["Theta"]       = theta_1step(train_series)
 
             try:
                 preds["Ridge"] = ml_1step(
@@ -85,6 +89,24 @@ def walk_forward_evaluate(
                 )
             except Exception:
                 preds["Ridge"] = train_series.iloc[-1]
+
+            try:
+                preds["ElasticNet"] = ml_1step(
+                    train_df, test_row.iloc[0], ElasticNet,
+                    all_features, target, scaler=StandardScaler(),
+                    max_iter=5000, **best_en_params,
+                )
+            except Exception:
+                preds["ElasticNet"] = train_series.iloc[-1]
+
+            try:
+                preds["BayesianRidge"] = ml_1step(
+                    train_df, test_row.iloc[0], BayesianRidge,
+                    all_features, target, scaler=StandardScaler(),
+                    max_iter=500,
+                )
+            except Exception:
+                preds["BayesianRidge"] = train_series.iloc[-1]
 
             try:
                 preds["RandomForest"] = ml_1step(

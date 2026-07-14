@@ -16,13 +16,6 @@
   <!-- Chart.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/3.0.1/chartjs-plugin-annotation.min.js"></script>
-  <script>
-    // Register annotation plugin with Chart.js v4
-    if (window.Chart && window['chartjs-plugin-annotation']) {
-      Chart.register(window['chartjs-plugin-annotation']);
-    }
-  </script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/3.0.1/chartjs-plugin-annotation.min.js"></script>
 
   <style>
     /* ── Reset & base ─────────────────────────────────────────── */
@@ -263,11 +256,60 @@
 
     /* ── Chart card ──────────────────────────────────────────── */
     .chart-card {
+      position: relative;
       background: var(--bg2);
       border: 1px solid var(--border2);
       border-radius: var(--radius-lg);
       padding: 20px 22px;
       box-shadow: 0 2px 12px rgba(0,0,0,.3);
+    }
+
+    .chart-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .btn-copy {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      color: var(--muted);
+      font: 500 11px var(--font-mono);
+      padding: 6px 11px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all .15s;
+      white-space: nowrap;
+    }
+    .btn-copy:hover  { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-copy.copied { background: var(--accent2); color: #fff; border-color: var(--accent2); }
+    .btn-copy svg    { width: 13px; height: 13px; flex-shrink: 0; }
+
+    .explain-box {
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      border-left: 3px solid var(--accent3);
+      border-radius: 8px;
+      padding: 16px 18px;
+      margin-bottom: 20px;
+      font-size: 13px;
+      line-height: 1.65;
+      color: var(--text);
+    }
+    .explain-box b { color: var(--accent); }
+    .explain-box .explain-title {
+      font-family: var(--font-head);
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 8px;
+      color: var(--text);
+      display: flex; align-items: center; gap: 8px;
     }
 
     .chart-legend {
@@ -287,8 +329,35 @@
 
     .leg-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 
+    .country-key-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      background: transparent;
+      padding: 0;
+      margin-bottom: 14px;
+    }
+    .country-key-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text);
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+    }
+    .country-key-dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
     .chart-wrap { position: relative; height: 320px; }
     .chart-wrap.tall { height: 380px; }
+    .chart-wrap.xtall { height: 460px; }
 
     /* ── Two-col grid ────────────────────────────────────────── */
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -704,6 +773,12 @@
 
     <div class="nav-section">
       <div class="nav-label">Dashboard</div>
+      <button class="nav-btn" onclick="showPage('data', this)">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.1-2.8-2.8L7 14"/>
+        </svg>
+        Data Overview
+      </button>
       <button class="nav-btn active" onclick="showPage('overview', this)">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -772,6 +847,69 @@
   <!-- ── Main ─────────────────────────────────────────────────── -->
   <main class="main">
 
+    <!-- ── DATA OVERVIEW PAGE ─────────────────────────────────── -->
+    <div id="page-data" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Data Overview</div>
+          <div class="page-meta">Raw electricity demand & underlying indicators — all 7 countries, 2000–2024</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">Electricity demand — all countries</span>
+          <span class="section-hint">Annual demand, 2000–2024</span>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header" style="justify-content:flex-end">
+            <button class="btn-copy" onclick="copyChart('dataDemandChart', this)" title="Copy chart as image">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <div class="country-key-bar" id="dataDemandKey"></div>
+          <div class="chart-wrap tall">
+            <canvas id="dataDemandChart" role="img" aria-label="Electricity demand all countries">Loading…</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">Underlying indicators — all countries</span>
+          <span class="section-hint">CO2 intensity, demand per capita, electricity imports</span>
+        </div>
+        <div class="two-col" id="dataSubcatGrid" style="grid-template-columns:1fr 1fr">
+          <!-- filled by JS: one chart-card per subcategory -->
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">Summary statistics — 2000 vs 2024</span>
+        </div>
+        <div class="chart-card">
+          <table class="forecast-table">
+            <thead>
+              <tr>
+                <th>Country</th>
+                <th>2000 (TWh)</th>
+                <th>2024 (TWh)</th>
+                <th>Total growth</th>
+                <th>Slope (TWh/yr)</th>
+                <th>Mean (TWh)</th>
+                <th>Std (TWh)</th>
+              </tr>
+            </thead>
+            <tbody id="data-summary-tbody">
+              <tr><td colspan="7" class="state-msg">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- ── OVERVIEW PAGE ──────────────────────────────────────── -->
     <div id="page-overview" class="page active">
       <div class="page-header">
@@ -825,13 +963,21 @@
           <span class="section-hint">Actual · Classical · DL · Events</span>
         </div>
         <div class="chart-card">
-          <div class="chart-legend">
-            <div class="leg-item"><div class="leg-dot" style="background:#6b7280"></div>Historical</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#3b9eff"></div>Classical</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#00d4a0"></div>Deep learning</div>
-            <div class="leg-item"><div class="leg-dot" style="background:rgba(59,158,255,.25);width:18px"></div>90% CI</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#e63946;border-radius:2px;width:3px;height:14px"></div>COVID-19</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#ff9f1c;border-radius:2px;width:3px;height:14px"></div>Ukraine war</div>
+          <div class="chart-card-header">
+            <div class="chart-legend" style="margin-bottom:0">
+              <div class="leg-item"><div class="leg-dot" style="background:#6b7280"></div>Historical</div>
+              <div class="leg-item"><div class="leg-dot" style="background:#3b9eff"></div>Classical</div>
+              <div class="leg-item"><div class="leg-dot" style="background:#00d4a0"></div>Deep learning</div>
+              <div class="leg-item"><div class="leg-dot" style="background:rgba(59,158,255,.25);width:18px"></div>90% CI</div>
+              <div class="leg-item"><div class="leg-dot" style="background:#e63946;border-radius:2px;width:3px;height:14px"></div>COVID-19</div>
+              <div class="leg-item"><div class="leg-dot" style="background:#ff9f1c;border-radius:2px;width:3px;height:14px"></div>Ukraine war</div>
+            </div>
+            <div id="ovForecastCopyWrap">
+              <button class="btn-copy" onclick="copyChart('ovForecastChart', this)" title="Copy chart as image">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                Copy
+              </button>
+            </div>
           </div>
           <div class="chart-wrap tall">
             <canvas id="ovForecastChart" role="img" aria-label="Demand history and forecast 2000-2030">Loading…</canvas>
@@ -856,6 +1002,12 @@
             <span class="section-hint pill pill-blue" id="fc-cmodel">—</span>
           </div>
           <div class="chart-card">
+            <div class="chart-card-header" style="justify-content:flex-end;margin-bottom:4px">
+              <button class="btn-copy" onclick="copyChart('fcClassicChart', this)" title="Copy chart as image">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                Copy
+              </button>
+            </div>
             <div class="chart-wrap">
               <canvas id="fcClassicChart" role="img" aria-label="Classical model forecast chart">Loading…</canvas>
             </div>
@@ -867,9 +1019,50 @@
             <span class="section-hint pill pill-green" id="fc-dlmodel">—</span>
           </div>
           <div class="chart-card">
+            <div class="chart-card-header" style="justify-content:flex-end;margin-bottom:4px">
+              <button class="btn-copy" onclick="copyChart('fcDLChart', this)" title="Copy chart as image">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                Copy
+              </button>
+            </div>
             <div class="chart-wrap">
               <canvas id="fcDLChart" role="img" aria-label="Deep learning forecast chart">Loading…</canvas>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="explain-box">
+          <div class="explain-title">📉 Why does Ridge score well on evaluation but diverge in the forecast?</div>
+          The <b>MAPE</b> shown for Ridge (and other ML models) is a <b>1-step-ahead</b>
+          walk-forward score: each test year is predicted using only <i>one step</i> from
+          known history, so small extrapolation errors in exogenous features never get
+          the chance to compound. The <b>2025–2030 forecast</b> below is a
+          <b>6-step recursive</b> projection — each year's prediction feeds into the next
+          year's inputs, so any instability (e.g. a lag/MA feature drifting outside its
+          historical range) compounds exponentially over the horizon. This is exactly
+          why a model can have the lowest test MAPE yet produce the least stable
+          long-horizon curve — short-horizon accuracy and long-horizon stability are
+          different properties, and only one of them is captured by MAPE.
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">All models — Forecast 2025–2030 comparison</span>
+          <span class="section-hint">Overlay every model on one chart per country</span>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <div class="chart-legend" id="allModelsLegend" style="margin-bottom:0"></div>
+            <button class="btn-copy" onclick="copyChart('allModelsChart', this)" title="Copy chart as image">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <div class="chart-wrap xtall">
+            <canvas id="allModelsChart" role="img" aria-label="All models forecast comparison">Loading…</canvas>
           </div>
         </div>
       </div>
@@ -936,9 +1129,15 @@
           <span class="section-title">MAPE comparison — classical vs deep learning</span>
         </div>
         <div class="chart-card">
-          <div class="chart-legend">
-            <div class="leg-item"><div class="leg-dot" style="background:#3b9eff"></div>Classical</div>
-            <div class="leg-item"><div class="leg-dot" style="background:#00d4a0"></div>Deep learning</div>
+          <div class="chart-card-header">
+            <div class="chart-legend" style="margin-bottom:0">
+              <div class="leg-item"><div class="leg-dot" style="background:#3b9eff"></div>Classical</div>
+              <div class="leg-item"><div class="leg-dot" style="background:#00d4a0"></div>Deep learning</div>
+            </div>
+            <button class="btn-copy" onclick="copyChart('compareBarChart', this)" title="Copy chart as image">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              Copy
+            </button>
           </div>
           <div class="chart-wrap">
             <canvas id="compareBarChart" role="img" aria-label="Bar chart comparing model MAPE values">Loading…</canvas>
@@ -1031,6 +1230,34 @@
 
   function destroyChart(id){
     if(charts[id]){ charts[id].destroy(); delete charts[id]; }
+  }
+
+  /* ── Copy chart to clipboard (for paper analysis) ────────────────── */
+  async function copyChart(canvasId, btnEl){
+    const canvas = document.getElementById(canvasId);
+    if(!canvas) return;
+    try {
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+      await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
+      if(btnEl){
+        const orig = btnEl.innerHTML;
+        btnEl.classList.add('copied');
+        btnEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Copied';
+        setTimeout(() => { btnEl.classList.remove('copied'); btnEl.innerHTML = orig; }, 1600);
+      }
+    } catch(e){
+      // Fallback: open image in new tab so user can right-click → save
+      const url = canvas.toDataURL('image/png');
+      window.open(url, '_blank');
+    }
+  }
+
+  /* ── Copy button markup helper ────────────────────────────────── */
+  function copyBtnHTML(canvasId){
+    return `<button class="btn-copy" onclick="copyChart('${canvasId}', this)" title="Copy chart as image">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+      Copy
+    </button>`;
   }
 
   /* ── Auth headers ────────────────────────────────────────────── */
@@ -1244,7 +1471,7 @@
     const activePage = document.querySelector('.page.active').id.replace('page-','');
     updateCountryLabels(currentCountry);
     // Destroy ALL charts immediately — prevents stale country data showing
-    ['ovForecast','fcClassic','fcDL','compareBar'].forEach(destroyChart);
+    ['ovForecast','fcClassic','fcDL','compareBar','allModels'].forEach(destroyChart);
     loadPage(activePage);
   }
 
@@ -1257,10 +1484,189 @@
 
   /* ── Page loader ─────────────────────────────────────────────── */
   function loadPage(name){
+    if(name === 'data')      loadDataOverview();
     if(name === 'overview')  loadOverview();
     if(name === 'forecast')  loadForecast();
     if(name === 'compare')   loadCompare();
     if(name === 'api')       renderApiPage();
+  }
+
+  /* ── DATA OVERVIEW (presentation page — all countries, no selector) ── */
+  const COUNTRY_PALETTE = {
+    Tunisia: '#e63946', Austria: '#60b4ff', Germany: '#4ade80',
+    Egypt: '#a78bfa', Canada: '#00e5aa', France: '#fb923c', Kuwait: '#facc15',
+  };
+  let dataOverviewLoaded = false;
+
+  /* Renders a pill-style color key into any element, for the given
+     list of countries — called once per chart so the key travels with
+     each individual plot (useful when copying a single chart for slides). */
+  function renderCountryKey(elId, countryList){
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.innerHTML = countryList.map(country => `
+      <div class="country-key-item">
+        <div class="country-key-dot" style="background:${COUNTRY_PALETTE[country] || '#94a3b8'}"></div>${country}
+      </div>`).join('');
+  }
+
+  async function loadDataOverview(){
+    // Chart data is static across countries — only fetch once per session
+    if (dataOverviewLoaded) return;
+
+    try {
+      const [demandData, subcatData, summaryData] = await Promise.all([
+        apiFetch('/data/demand-history'),
+        apiFetch('/data/subcategories'),
+        apiFetch('/data/summary'),
+      ]);
+
+      /* ── All-countries demand chart ─────────────────────────── */
+      const countryNames = Object.keys(demandData.countries || {});
+      const allYears = countryNames.length
+        ? demandData.countries[countryNames[0]].years : [];
+
+      const demandDatasets = countryNames.map(country => ({
+        label: country,
+        data: demandData.countries[country].demand_twh,
+        borderColor: COUNTRY_PALETTE[country] || '#94a3b8',
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: .3,
+        fill: false,
+      }));
+
+      renderCountryKey('dataDemandKey', countryNames);
+
+      /* Event annotations — same 3 periods used on the forecast charts */
+      const EVENTS = [
+        { year: 2009, label: '2008 Financial crisis', color: '#6b7280' },
+        { year: 2020, label: 'COVID-19 pandemic',      color: '#e63946' },
+        { year: 2022, label: 'Ukraine-Russia war',      color: '#ff9f1c' },
+      ];
+      function buildEventAnnotations(years){
+        const ann = {};
+        EVENTS.forEach((ev, i) => {
+          const xIdx = years.indexOf(ev.year);
+          if (xIdx < 0) return;
+          ann['ev'+i] = {
+            type: 'line', scaleID: 'x', value: xIdx,
+            borderColor: ev.color, borderWidth: 1.5, borderDash: [4, 3],
+            label: {
+              display: true, content: ev.label,
+              font: { size: 9, family: "'DM Mono', monospace" },
+              color: ev.color, backgroundColor: 'rgba(10,12,16,.85)',
+              position: 'start', yAdjust: -6,
+              padding: { x: 6, y: 3 }, borderRadius: 4,
+            }
+          };
+        });
+        return ann;
+      }
+
+      destroyChart('dataDemand');
+      charts['dataDemand'] = new Chart(document.getElementById('dataDemandChart'), {
+        type:'line',
+        data:{ labels: allYears, datasets: demandDatasets },
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{display:false},
+            annotation:{ annotations: buildEventAnnotations(allYears) },
+            tooltip:{ mode:'index', intersect:false,
+              callbacks:{ label: ctx => ctx.dataset.label+': '+
+                (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(1)+' TWh' : '—') }}},
+          scales:{
+            x:{ grid:{color:'rgba(255,255,255,.08)'}, ticks:{font:{size:11}} },
+            y:{ grid:{color:'rgba(255,255,255,.08)'}, title:{display:true,text:'TWh'},
+              ticks:{callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(0)} } },
+          interaction:{mode:'nearest',axis:'x',intersect:false} }
+      });
+
+      /* ── Subcategory small multiples ─────────────────────────── */
+      const gridEl = document.getElementById('dataSubcatGrid');
+      gridEl.innerHTML = '';
+      const subcats = subcatData.subcategories || {};
+
+      Object.keys(subcats).forEach((subcatName, idx) => {
+        const entry = subcats[subcatName];
+        const canvasId = 'subcatChart_' + idx;
+        const keyId = 'subcatKey_' + idx;
+        const card = document.createElement('div');
+        card.className = 'section';
+        card.innerHTML = `
+          <div class="section-head">
+            <span class="section-title">${subcatName}</span>
+            <span class="section-hint">${entry.unit || ''}</span>
+          </div>
+          <div class="chart-card">
+            <div class="chart-card-header" style="justify-content:flex-end;margin-bottom:4px">
+              <button class="btn-copy" onclick="copyChart('${canvasId}', this)" title="Copy chart as image">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                Copy
+              </button>
+            </div>
+            <div class="country-key-bar" id="${keyId}"></div>
+            <div class="chart-wrap">
+              <canvas id="${canvasId}" role="img" aria-label="${subcatName} per country"></canvas>
+            </div>
+          </div>`;
+        gridEl.appendChild(card);
+
+        const countryList = Object.keys(entry.countries || {});
+        renderCountryKey(keyId, countryList);
+        const yrs = countryList.length ? entry.countries[countryList[0]].years : [];
+        const datasets = countryList.map(country => ({
+          label: country,
+          data: entry.countries[country].values,
+          borderColor: COUNTRY_PALETTE[country] || '#94a3b8',
+          backgroundColor: 'transparent',
+          borderWidth: 1.8,
+          pointRadius: 0,
+          tension: .3,
+          fill: false,
+          spanGaps: true,
+        }));
+
+        destroyChart(canvasId);
+        charts[canvasId] = new Chart(document.getElementById(canvasId), {
+          type:'line',
+          data:{ labels: yrs, datasets },
+          options:{ responsive:true, maintainAspectRatio:false,
+            plugins:{ legend:{display:false},
+              annotation:{ annotations: buildEventAnnotations(yrs) },
+              tooltip:{ mode:'index', intersect:false,
+                callbacks:{ label: ctx => ctx.dataset.label+': '+
+                  (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(2) : '—') }}},
+            scales:{
+              x:{ grid:{color:'rgba(255,255,255,.08)'}, ticks:{font:{size:10}, maxTicksLimit:8} },
+              y:{ grid:{color:'rgba(255,255,255,.08)'} } },
+            interaction:{mode:'nearest',axis:'x',intersect:false} }
+        });
+      });
+
+      /* ── Summary table ────────────────────────────────────────── */
+      const tbody = document.getElementById('data-summary-tbody');
+      const rows = summaryData.rows || [];
+      if (rows.length){
+        tbody.innerHTML = rows.map(r => `
+          <tr>
+            <td><b>${r['Country']}</b></td>
+            <td>${r['2000 (TWh)']}</td>
+            <td>${r['2024 (TWh)']}</td>
+            <td>${r['Total Growth']}</td>
+            <td>${r['Slope TWh/yr']}</td>
+            <td>${r['Mean TWh']}</td>
+            <td>${r['Std TWh']}</td>
+          </tr>`).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="7" class="state-msg">No summary data available.</td></tr>';
+      }
+
+      dataOverviewLoaded = true;
+    } catch(e) {
+      console.error('Data overview failed:', e);
+      showToast('Could not load data overview', 'error');
+    }
   }
 
   /* ── OVERVIEW ────────────────────────────────────────────────── */
@@ -1279,10 +1685,10 @@
       document.getElementById('s-2030').textContent  = fmt(fc.forecast_twh[5],1);
 
       const s = gr.summary;
-      document.getElementById('s-cagr').textContent  = fmtPct(s['CAGR (%)'] ?? s.cagr);
-      const base = s['2024 TWh'] ?? s['base_twh'];
-      const end  = s['2030 TWh (forecast)'] ?? fc.forecast_twh[5];
-      const growth = base ? ((end-base)/base*100) : null;
+      document.getElementById('s-cagr').textContent  = fmtPct(s['CAGR 24-30 %'] ?? s['CAGR (%)'] ?? s.cagr);
+      const base = s['2024 (TWh)'] ?? s['2025 (TWh)'] ?? s['base_twh'];
+      const end  = s['2030 Forecast'] ?? s['2030 TWh (forecast)'] ?? fc.forecast_twh[5];
+      const growth = s['Total Growth %'] ?? (base ? ((end-base)/base*100) : null);
       document.getElementById('s-growth').textContent = fmtPct(growth);
 
       document.getElementById('s-bmodel').textContent  = bm.classical_model ?? '—';
@@ -1357,7 +1763,7 @@
           responsive:true, maintainAspectRatio:false,
           plugins:{
             legend:{ display:false },
-            annotation: Object.keys(eventAnnotations).length ? { annotations: eventAnnotations } : {},
+            annotation: Object.keys(eventAnnotations).length ? { annotations: eventAnnotations } : undefined,
             tooltip:{
               mode:'index', intersect:false,
               callbacks:{ label: ctx => ctx.dataset.label+': '+
@@ -1451,7 +1857,7 @@
         ]},
         options:{ responsive:true, maintainAspectRatio:false,
           plugins:{ legend:{display:false},
-            annotation: { annotations: makeEventAnnotations(allYrs) },
+            annotation:{ annotations: makeEventAnnotations(allYrs) },
             tooltip:{ mode:'index', intersect:false,
               callbacks:{ label: ctx => ctx.dataset.label+': '+
                 (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(1)+' TWh' : '—') }}},
@@ -1479,7 +1885,7 @@
         ]},
         options:{ responsive:true, maintainAspectRatio:false,
           plugins:{ legend:{display:false},
-            annotation: { annotations: makeEventAnnotations(allYrs) },
+            annotation:{ annotations: makeEventAnnotations(allYrs) },
             tooltip:{ mode:'index', intersect:false,
               callbacks:{ label: ctx => ctx.dataset.label+': '+
                 (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(1)+' TWh' : '—') }}},
@@ -1491,6 +1897,74 @@
               ticks:{callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(1)}} },
           interaction:{mode:'nearest',axis:'x',intersect:false} }
       });
+
+      /* ── All models comparison chart ──────────────────────────── */
+      destroyChart('allModels');
+      try {
+        const allData = await apiFetch('/forecast/all/'+c);
+        const modelNames = Object.keys(allData.models || {});
+
+        // Distinct color palette — enough hues for 11 models
+        const palette = [
+          '#60b4ff', '#00e5aa', '#ff9f1c', '#e63946', '#a78bfa',
+          '#f472b6', '#4ade80', '#facc15', '#38bdf8', '#fb923c', '#94a3b8',
+        ];
+
+        const allYrs2 = [...hist.years, ...YEARS];
+        const histData2 = [...hist.demand_twh, ...Array(YEARS.length).fill(null)];
+
+        const datasets = [
+          { label:'Historical', data: histData2,
+            borderColor:'#e8eaf0', backgroundColor:'transparent',
+            borderWidth:2.5, pointRadius:0, tension:.3, fill:false, spanGaps:false, order:0 },
+        ];
+
+        modelNames.forEach((m, i) => {
+          const s = allData.models[m];
+          const paddedData = [...Array(hist.years.length).fill(null), ...s.forecast_twh];
+          const isWinner = m === fc.model;
+          datasets.push({
+            label: m,
+            data: paddedData,
+            borderColor: palette[i % palette.length],
+            backgroundColor: 'transparent',
+            borderWidth: isWinner ? 3 : 1.4,
+            borderDash: isWinner ? [] : [5,3],
+            pointRadius: isWinner ? 3 : 0,
+            tension: .3,
+            fill: false,
+            spanGaps: false,
+            order: isWinner ? 0 : 1,
+          });
+        });
+
+        // Build legend manually (Chart.js legend gets crowded with 11+ lines)
+        const legendEl = document.getElementById('allModelsLegend');
+        legendEl.innerHTML = datasets.slice(1).map((d,i) => `
+          <div class="leg-item">
+            <div class="leg-dot" style="background:${d.borderColor}${d.label===fc.model?';box-shadow:0 0 0 2px '+d.borderColor+'55':''}"></div>
+            ${d.label}${d.label===fc.model ? ' ★' : ''}
+          </div>`).join('');
+
+        charts['allModels'] = new Chart(document.getElementById('allModelsChart'), {
+          type:'line',
+          data:{ labels: allYrs2, datasets },
+          options:{ responsive:true, maintainAspectRatio:false,
+            plugins:{ legend:{display:false},
+              tooltip:{ mode:'index', intersect:false,
+                callbacks:{ label: ctx => ctx.dataset.label+': '+
+                  (ctx.parsed.y!=null ? ctx.parsed.y.toFixed(1)+' TWh' : '—') }}},
+            scales:{
+              x:{ grid:{color:'rgba(255,255,255,.08)'},
+                ticks:{font:{size:10}, maxTicksLimit:16, maxRotation:0,
+                  callback:(val,i)=> allYrs2[i]%5===0 ? allYrs2[i] : ''} },
+              y:{ grid:{color:'rgba(255,255,255,.08)'},
+                ticks:{callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(1)}} },
+            interaction:{mode:'nearest',axis:'x',intersect:false} }
+        });
+      } catch(e) {
+        console.warn('All-models forecast unavailable:', e);
+      }
 
       /* table */
       const tbody = document.getElementById('forecast-tbody');

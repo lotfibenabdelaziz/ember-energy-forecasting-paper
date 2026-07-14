@@ -158,7 +158,14 @@ STEP_ORDER = ["eda", "preprocessing", "modeling", "forecasting", "deeplearning"]
 # ── CLI args for each step ────────────────────────────────────────────────────
 
 def build_step_args(name: str, run_cfg: PipelineConfig) -> list[str]:
-    """Build the CLI argument list for a given step."""
+    """
+    Build the CLI argument list for a given step.
+
+    NOTE: step02_preprocessing.py's parse_args() only accepts --train_until
+    (VAL_END=2020 and TEST_END=2024 are hardcoded inside that script's
+    save_outputs()). Do not pass --val_until/--test_until here — that script
+    was reverted to the original baseline and never accepted them.
+    """
     args_map: dict[str, list[str]] = {
         "eda": [
             "--csv",        run_cfg.csv,
@@ -168,8 +175,6 @@ def build_step_args(name: str, run_cfg: PipelineConfig) -> list[str]:
             "--input_dir",   f"{_OUT}/eda",
             "--output_dir",  f"{_OUT}/preprocessing",
             "--train_until", str(run_cfg.train_until),
-            "--val_until",   str(project_cfg.val_end),
-            "--test_until",  str(project_cfg.test_end),
         ],
         "modeling": [
             "--input_dir",  f"{_OUT}/preprocessing",
@@ -310,8 +315,6 @@ def main() -> None:
     log.info("  Steps          : %s", run_cfg.steps)
     log.info("  train_until    : %d", run_cfg.train_until)
     log.info("  forecast_until : %d", run_cfg.forecast_until)
-    log.info("  val_end        : %d", project_cfg.val_end)
-    log.info("  test_end       : %d", project_cfg.test_end)
     log.info("  Cache          : %s", "DISABLED (--force)" if run_cfg.force else "ENABLED")
     log.info("=" * 60)
 
