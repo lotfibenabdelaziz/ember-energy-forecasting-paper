@@ -73,6 +73,11 @@ METRICS_CSV = _ROOT / "modeling" / "test_benchmarking.csv"
 GROWTH_CSV = _ROOT / "forecasting" / "demand_growth_summary.csv"
 BEST_MODELS_CSV = _ROOT / "modeling" / "best_models.csv"
 BENCHMARKING_CSV = _ROOT / "modeling" / "test_benchmarking.csv"
+SIGNIFICANCE_TESTS_CSV   = _ROOT / "modeling" / "significance_tests.csv"
+SIGNIFICANCE_SUMMARY_CSV = _ROOT / "modeling" / "significance_summary.csv"
+ROBUSTNESS_SUMMARY_CSV   = _ROOT / "forecasting" / "robustness_summary.csv"
+ROBUSTNESS_VS_ACCURACY_CSV = _ROOT / "forecasting" / "robustness_vs_accuracy.csv"
+BEST_MODEL_CONFLICTS_CSV   = _ROOT / "forecasting" / "best_model_conflicts.csv"
 DL_FORECAST_CSV = _ROOT / "deeplearning" / "dl_forecast_2025_2030.csv"
 DL_METRICS_CSV = _ROOT / "deeplearning" / "dl_benchmarking.csv"
 DL_BEST_CSV  = _ROOT / "deeplearning" / "dl_best_models.csv"
@@ -119,6 +124,11 @@ def _load_all() -> dict[str, pd.DataFrame]:
         "dl_forecast": _load(DL_FORECAST_CSV, "dl_forecast"),
         "dl_metrics": _load(DL_METRICS_CSV, "dl_metrics"),
         "dl_best":  _load(DL_BEST_CSV,  "dl_best"),
+        "significance_tests":   _load(SIGNIFICANCE_TESTS_CSV,   "significance_tests"),
+        "significance_summary": _load(SIGNIFICANCE_SUMMARY_CSV, "significance_summary"),
+        "robustness_summary":       _load(ROBUSTNESS_SUMMARY_CSV,       "robustness_summary"),
+        "robustness_vs_accuracy":   _load(ROBUSTNESS_VS_ACCURACY_CSV,   "robustness_vs_accuracy"),
+        "best_model_conflicts":     _load(BEST_MODEL_CONFLICTS_CSV,     "best_model_conflicts"),
         "history":  _load(HISTORY_CSV,  "history"),
         "subcategories": _load(SUBCATEGORY_CSV, "subcategories"),
         "summary_stats": _load(SUMMARY_STATS_CSV, "summary_stats"),
@@ -581,6 +591,72 @@ def get_dl_metrics(country: str) -> dict:
         "model": sub["Model"].iloc[0] if "Model" in sub.columns else "dl",
         "metrics": _metrics_dict(sub.iloc[0]),
     }
+
+
+# ── Model diagnostics — significance & robustness ─────────────────────────────
+
+
+@app.get("/significance/{country}", tags=["diagnostics"], dependencies=[Depends(get_current_user)])
+def get_significance(country: str) -> dict:
+    """
+    Statistical significance (DM test + Wilcoxon) of MAPE differences
+    between every model pair for this country — answers "is Model A
+    really better than Model B, or is that just test-set noise?"
+    """
+    country = _validate_country(country)
+    df = _require(_DATA["significance_tests"], "Significance tests")
+    sub = df[df["Country"] == country]
+    if sub.empty:
+        raise HTTPException(404, f"No significance test data for {country}")
+    return {"country": country, "pairs": sub.drop(columns=["Country"]).to_dict(orient="records")}
+
+
+@app.get("/robustness/conflicts", tags=["diagnostics"], dependencies=[Depends(get_current_user)])
+def get_robustness_conflicts() -> dict:
+    """
+    Across ALL countries: does the model selected as "best" purely on
+    MAPE actually get flagged WATCH/UNSTABLE on the robustness axis?
+    This is the direct dashboard answer to "accuracy alone would have
+    hidden this" — surfaced globally, not per-country.
+
+    NOTE: this route MUST be declared before /robustness/{country} —
+    FastAPI matches routes in declaration order, so a parameterized
+    route declared first will capture "conflicts" as a country name
+    and 404 before this handler is ever reached.
+    """
+    df = _require(_DATA["best_model_conflicts"], "Best-model conflicts")
+    n_conflicts = int(df["conflict"].sum()) if "conflict" in df.columns else 0
+    return {
+        "total_countries": len(df),
+        "n_conflicts": n_conflicts,
+        "rows": df.to_dict(orient="records"),
+    }
+
+
+@app.get("/robustness/{country}", tags=["diagnostics"], dependencies=[Depends(get_current_user)])
+def get_robustness(country: str) -> dict:
+    """
+    Recursive extrapolation robustness score per model for this country —
+    independent of MAPE. Flags STABLE / WATCH / UNSTABLE based on how far
+    the 2025-2030 point forecast strays from the last known value.
+    """
+    country = _validate_country(country)
+    df = _require(_DATA["robustness_summary"], "Robustness summary")
+    sub = df[df["Country"] == country].sort_values("max_deviation_pct")
+    if sub.empty:
+        raise HTTPException(404, f"No robustness data for {country}")
+
+    result = {"country": country, "models": sub.drop(columns=["Country"]).to_dict(orient="records")}
+
+    # Merge in accuracy rank if available, so the dashboard can show both
+    # axes side by side — the whole point of this metric.
+    combo = _DATA["robustness_vs_accuracy"]
+    if not combo.empty:
+        combo_sub = combo[combo["Country"] == country]
+        if not combo_sub.empty:
+            result["accuracy_vs_robustness"] = combo_sub.drop(columns=["Country"]).to_dict(orient="records")
+
+    return result
 
 
 # ── Best models ───────────────────────────────────────────────────────────────

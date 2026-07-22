@@ -281,6 +281,40 @@ def main() -> None:
     all_models_df.to_csv(os.path.join(args.output_dir, "all_models_forecast.csv"), index=False)
     log.info("All-models forecast table: %s", all_models_df.shape)
 
+    # ── Robustness scoring — answers "Missing Evaluation Axis" review ────────
+    # MAPE (test_benchmarking.csv) measures accuracy only. This measures
+    # recursive extrapolation stability, independently, for every model.
+    from src.modeling.robustness import (
+        compute_robustness_score, robustness_vs_accuracy, flag_best_model_conflicts,
+    )
+
+    last_known = {}
+    for country in COUNTRIES:
+        sub = df[df["Area"] == country].sort_values("Year")
+        if not sub.empty:
+            last_known[country] = float(sub[TARGET].values[-1])
+
+    robustness_df = compute_robustness_score(all_models_df, last_known)
+    robustness_df.to_csv(os.path.join(args.output_dir, "robustness_summary.csv"), index=False)
+    log.info("Robustness summary: %s", robustness_df.shape)
+
+    test_bench_path = os.path.join(args.model_dir, "test_benchmarking.csv")
+    if os.path.exists(test_bench_path) and not robustness_df.empty:
+        accuracy_df  = pd.read_csv(test_bench_path)
+        combined_df  = robustness_vs_accuracy(robustness_df, accuracy_df)
+        combined_df.to_csv(os.path.join(args.output_dir, "robustness_vs_accuracy.csv"), index=False)
+
+        conflicts_df = flag_best_model_conflicts(best_df, robustness_df)
+        conflicts_df.to_csv(os.path.join(args.output_dir, "best_model_conflicts.csv"), index=False)
+        n_conflicts  = int(conflicts_df["conflict"].sum())
+        log.info(
+            "Robustness: %d/%d best-by-MAPE models flagged WATCH/UNSTABLE",
+            n_conflicts, len(conflicts_df),
+        )
+    else:
+        log.warning("test_benchmarking.csv not found or robustness_df empty — "
+                     "skipping robustness_vs_accuracy / best_model_conflicts")
+
     # Export
     fc_df.to_csv(os.path.join(args.output_dir, "demand_forecast_2025_2030.csv"), index=False)
     growth_df.to_csv(os.path.join(args.output_dir, "demand_growth_summary.csv"), index=False)
@@ -289,6 +323,7 @@ def main() -> None:
     log.info("  demand_forecast_2025_2030.csv : %s", fc_df.shape)
     log.info("  demand_growth_summary.csv     : %s", growth_df.shape)
     log.info("  all_models_forecast.csv       : %s", all_models_df.shape)
+    log.info("  robustness_summary.csv        : %s", robustness_df.shape)
     log.info("  Saved → %s", args.output_dir)
 
 

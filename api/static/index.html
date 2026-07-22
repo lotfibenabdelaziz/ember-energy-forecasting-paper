@@ -383,6 +383,18 @@
     .metrics-table .num { font-family: var(--font-mono); font-size: 12px; }
     .best-row { background: rgba(59,158,255,.04); }
 
+    .flag-good, .flag-warn, .flag-bad {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 9px;
+      border-radius: 999px;
+      letter-spacing: .02em;
+    }
+    .flag-good { background: rgba(74,222,128,.15); color: #4ade80; }
+    .flag-warn { background: rgba(250,204,21,.15);  color: #facc15; }
+    .flag-bad  { background: rgba(230,57,70,.15);   color: #e63946; }
+
     /* ── Forecast table ──────────────────────────────────────── */
     .forecast-table { width: 100%; border-collapse: collapse; }
     .forecast-table th {
@@ -1106,9 +1118,9 @@
           </div>
           <table class="metrics-table" id="classic-metrics-table">
             <thead>
-              <tr><th>Model</th><th>MAE</th><th>RMSE</th><th>MAPE%</th><th>R²</th></tr>
+              <tr><th>Model</th><th>MAE</th><th>RMSE</th><th>MAPE%</th></tr>
             </thead>
-            <tbody><tr><td colspan="5" class="state-msg">Loading…</td></tr></tbody>
+            <tbody><tr><td colspan="4" class="state-msg">Loading…</td></tr></tbody>
           </table>
         </div>
         <div class="chart-card">
@@ -1117,9 +1129,9 @@
           </div>
           <table class="metrics-table" id="dl-metrics-table">
             <thead>
-              <tr><th>Model</th><th>MAE</th><th>RMSE</th><th>MAPE%</th><th>R²</th></tr>
+              <tr><th>Model</th><th>MAE</th><th>RMSE</th><th>MAPE%</th><th>SMAPE%</th><th>N</th></tr>
             </thead>
-            <tbody><tr><td colspan="5" class="state-msg">Loading…</td></tr></tbody>
+            <tbody><tr><td colspan="6" class="state-msg">Loading…</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -1141,6 +1153,40 @@
           </div>
           <div class="chart-wrap">
             <canvas id="compareBarChart" role="img" aria-label="Bar chart comparing model MAPE values">Loading…</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">Model diagnostics — accuracy vs. robustness</span>
+          <span class="section-hint">MAPE measures accuracy only — this measures recursive stability</span>
+        </div>
+
+        <div class="explain-box" id="conflictBanner" style="display:none"></div>
+
+        <div class="two-col">
+          <div class="chart-card">
+            <div class="section-head" style="margin-bottom:12px">
+              <span class="section-title">Recursion robustness — <span id="cmp-country-rb">Tunisia</span></span>
+            </div>
+            <table class="metrics-table" id="robustness-table">
+              <thead>
+                <tr><th>Model</th><th>Max dev. %</th><th>Max YoY %</th><th>Flips</th><th>Flag</th></tr>
+              </thead>
+              <tbody><tr><td colspan="5" class="state-msg">Loading…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="chart-card">
+            <div class="section-head" style="margin-bottom:12px">
+              <span class="section-title">Statistical significance (top pairs)</span>
+            </div>
+            <table class="metrics-table" id="significance-table">
+              <thead>
+                <tr><th>Model A</th><th>Model B</th><th>DM p</th><th>Wilcoxon p</th><th>Significant?</th></tr>
+              </thead>
+              <tbody><tr><td colspan="5" class="state-msg">Loading…</td></tr></tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -1998,10 +2044,10 @@
         ct.innerHTML = `<tr class="best-row">
           <td class="model-name">${cmp.classical?.model ?? '—'}</td>
           <td class="num">${fmt(m.MAE)}</td><td class="num">${fmt(m.RMSE)}</td>
-          <td class="num">${fmt(m.MAPE)}</td><td class="num">${fmt(m.R2,3)}</td>
+          <td class="num">${fmt(m.MAPE)}</td>
         </tr>`;
       } else {
-        ct.innerHTML = `<tr><td colspan="5" class="state-msg">No data</td></tr>`;
+        ct.innerHTML = `<tr><td colspan="4" class="state-msg">No data</td></tr>`;
       }
 
       /* DL metrics table */
@@ -2011,10 +2057,11 @@
         dt.innerHTML = `<tr class="best-row">
           <td class="model-name">${cmp.deeplearning?.model ?? '—'}</td>
           <td class="num">${fmt(m.MAE)}</td><td class="num">${fmt(m.RMSE)}</td>
-          <td class="num">${fmt(m.MAPE)}</td><td class="num">${fmt(m.R2,3)}</td>
+          <td class="num">${fmt(m.MAPE)}</td><td class="num">${fmt(m.SMAPE)}</td>
+          <td class="num">${m.N ?? '—'}</td>
         </tr>`;
       } else {
-        dt.innerHTML = `<tr><td colspan="5" class="state-msg">No data</td></tr>`;
+        dt.innerHTML = `<tr><td colspan="6" class="state-msg">No data</td></tr>`;
       }
 
       /* bar chart */
@@ -2043,6 +2090,62 @@
           }
         }
       });
+
+      /* ── Robustness table ─────────────────────────────────────── */
+      document.getElementById('cmp-country-rb').textContent = c;
+      const rbTbody = document.querySelector('#robustness-table tbody');
+      try {
+        const rb = await apiFetch('/robustness/'+c);
+        const rows = (rb.models || []).slice(0, 8); // top 8 most stable first (already sorted)
+        rbTbody.innerHTML = rows.length ? rows.map(m => {
+          const flagClass = m.robustness_flag === 'UNSTABLE' ? 'flag-bad'
+                            : m.robustness_flag === 'WATCH' ? 'flag-warn' : 'flag-good';
+          return `<tr>
+            <td class="model-name">${m.Model}</td>
+            <td class="num">${fmt(m.max_deviation_pct,1)}%</td>
+            <td class="num">${fmt(m.max_yoy_change_pct,1)}%</td>
+            <td class="num">${m.direction_flips}</td>
+            <td><span class="${flagClass}">${m.robustness_flag}</span></td>
+          </tr>`;
+        }).join('') : `<tr><td colspan="5" class="state-msg">No data</td></tr>`;
+      } catch(e) {
+        rbTbody.innerHTML = `<tr><td colspan="5" class="state-msg">No robustness data</td></tr>`;
+      }
+
+      /* ── Significance table ───────────────────────────────────── */
+      const sigTbody = document.querySelector('#significance-table tbody');
+      try {
+        const sig = await apiFetch('/significance/'+c);
+        const rows = (sig.pairs || []).slice(0, 8);
+        sigTbody.innerHTML = rows.length ? rows.map(p => `
+          <tr>
+            <td class="model-name">${p.Model_A}</td>
+            <td class="model-name">${p.Model_B}</td>
+            <td class="num">${fmt(p.DM_p,3)}</td>
+            <td class="num">${fmt(p.WX_p,3)}</td>
+            <td>${(p.significant_DM || p.significant_WX) ? '<span class="flag-good">Yes</span>' : '<span class="flag-warn">No</span>'}</td>
+          </tr>`).join('') : `<tr><td colspan="5" class="state-msg">No data</td></tr>`;
+      } catch(e) {
+        sigTbody.innerHTML = `<tr><td colspan="5" class="state-msg">No significance data</td></tr>`;
+      }
+
+      /* ── Global conflict banner ───────────────────────────────── */
+      try {
+        const conflicts = await apiFetch('/robustness/conflicts');
+        const banner = document.getElementById('conflictBanner');
+        if (conflicts.n_conflicts > 0) {
+          const flagged = conflicts.rows.filter(r => r.conflict).map(r => r.Country).join(', ');
+          banner.style.display = 'block';
+          banner.innerHTML = `<div class="explain-title">⚠️ ${conflicts.n_conflicts}/${conflicts.total_countries} best-by-MAPE models flagged unstable</div>
+            For <b>${flagged}</b>, the model with the lowest test MAPE was flagged WATCH or UNSTABLE
+            on the recursive robustness axis — meaning accuracy alone would have hidden a real
+            forecasting risk. See <b>Recursion robustness</b> below for the current country.`;
+        } else {
+          banner.style.display = 'none';
+        }
+      } catch(e) {
+        console.warn('Conflict banner unavailable:', e);
+      }
 
     } catch(e) {
       console.error('Compare load error:', e);

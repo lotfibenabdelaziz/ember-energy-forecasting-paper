@@ -134,11 +134,26 @@ def main() -> None:
     best_test.to_csv(os.path.join(args.output_dir, "best_models.csv"),          index=False)
     res.to_csv(os.path.join(args.output_dir, "wf_test_predictions.csv"),        index=False)
 
+    # ── Statistical significance of MAPE differences ──────────────────────────
+    # DM test + Wilcoxon signed-rank on every model pair per country, using
+    # the same walk-forward TEST predictions as the accuracy metrics above.
+    from src.modeling.significance import run_significance_tests, significance_summary
+
+    sig_results = run_significance_tests(res)
+    if not sig_results.empty:
+        sig_summary_df = significance_summary(sig_results)
+        sig_results.to_csv(os.path.join(args.output_dir, "significance_tests.csv"), index=False)
+        sig_summary_df.to_csv(os.path.join(args.output_dir, "significance_summary.csv"), index=False)
+        log.info("Significance tests: %d model pairs tested across all countries", len(sig_results))
+    else:
+        log.warning("run_significance_tests returned no rows — skipping significance export")
+
     log.info("=== Modeling Complete ===")
-    log.info("  test_benchmarking.csv   : %s", test_metrics.shape)
-    log.info("  val_benchmarking.csv    : %s", val_metrics.shape)
-    log.info("  best_models.csv         : %s", best_test.shape)
-    log.info("  wf_test_predictions.csv : %s", res.shape)
+    log.info("  test_benchmarking.csv     : %s", test_metrics.shape)
+    log.info("  val_benchmarking.csv      : %s", val_metrics.shape)
+    log.info("  best_models.csv           : %s", best_test.shape)
+    log.info("  wf_test_predictions.csv   : %s", res.shape)
+    log.info("  significance_tests.csv    : %s", sig_results.shape)
     log.info("  Saved → %s", args.output_dir)
 
 
