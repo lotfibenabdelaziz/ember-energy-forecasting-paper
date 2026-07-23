@@ -43,9 +43,9 @@ def forecast_statistical(series: np.ndarray, model_name: str, horizon: int) -> n
         m = ExponentialSmoothing(series, trend="add", damped_trend=True).fit(optimized=True)
         return np.array(m.forecast(horizon))
     elif model_name == "DampedHolt":
-        m = ExponentialSmoothing(
-            series, trend="add", damped_trend=True
-        ).fit(optimized=True, damping_trend=0.85)
+        m = ExponentialSmoothing(series, trend="add", damped_trend=True).fit(
+            optimized=True, damping_trend=0.85
+        )
         return np.array(m.forecast(horizon))
     elif model_name in ("ARIMA(1,1,1)", "ARIMA_1_1_1"):
         m = ARIMA(series, order=(1, 1, 1)).fit()
@@ -55,9 +55,13 @@ def forecast_statistical(series: np.ndarray, model_name: str, horizon: int) -> n
     elif model_name == "SARIMA":
         try:
             from statsmodels.tsa.statespace.sarimax import SARIMAX
+
             m = SARIMAX(
-                series, order=(1, 1, 1), seasonal_order=(1, 0, 1, 1),
-                enforce_stationarity=False, enforce_invertibility=False,
+                series,
+                order=(1, 1, 1),
+                seasonal_order=(1, 0, 1, 1),
+                enforce_stationarity=False,
+                enforce_invertibility=False,
             ).fit(disp=False, maxiter=200)
             return np.array(m.forecast(horizon))
         except Exception:
@@ -66,6 +70,7 @@ def forecast_statistical(series: np.ndarray, model_name: str, horizon: int) -> n
     elif model_name == "Theta":
         try:
             from statsmodels.tsa.forecasting.theta import ThetaModel
+
             m = ThetaModel(series, period=1).fit(use_mle=True)
             return np.array(m.forecast(horizon))
         except Exception:
@@ -84,12 +89,12 @@ def extrapolate_exog(
     preds: dict[str, np.ndarray] = {}
     n = len(history_df)
     for col in exog_cols:
-        y        = history_df[col].values.astype(float)
-        y        = np.where(np.isfinite(y), y, np.nanmedian(y))
+        y = history_df[col].values.astype(float)
+        y = np.where(np.isfinite(y), y, np.nanmedian(y))
         last_val = y[-1]
         X = np.arange(n).reshape(-1, 1)
         try:
-            m   = LinearRegression().fit(X, y)
+            m = LinearRegression().fit(X, y)
             raw = m.predict(np.arange(n, n + n_steps).reshape(-1, 1)).flatten()
             clipped = np.zeros(n_steps)
             for step in range(n_steps):
@@ -115,11 +120,13 @@ def get_ml_cls_map() -> dict:
     }
     try:
         from sklearn.linear_model import ElasticNet
+
         ml_map["ElasticNet"] = (ElasticNet, True)
     except ImportError:
         pass
     try:
         from sklearn.linear_model import BayesianRidge as BR
+
         ml_map["BayesianRidge"] = (BR, True)
     except ImportError:
         pass
@@ -190,7 +197,7 @@ def bootstrap_forecast_ci(
     # whole interval. Band grows slightly with horizon.
     for step in range(boot_arr.shape[1]):
         center = base_fc[step]
-        band   = max(abs(center), 1.0) * (0.35 + 0.05 * step)
+        band = max(abs(center), 1.0) * (0.35 + 0.05 * step)
         boot_arr[:, step] = np.clip(boot_arr[:, step], center - band, center + band)
 
     raw_lo = np.percentile(boot_arr, alpha, axis=0)
@@ -201,20 +208,23 @@ def bootstrap_forecast_ci(
     hi = np.maximum(raw_hi, base_fc)
 
     # Sanity check — if first-year deviation > 25% use LinearTrend fallback
-    ts         = history_df[target].values.astype(float)
+    ts = history_df[target].values.astype(float)
     last_known = ts[-1]
     if last_known != 0:
         deviation = abs(base_fc[0] - last_known) / abs(last_known)
         if deviation > 0.25:
             import logging as _log
+
             _log.getLogger(__name__).warning(
                 "Forecast deviates %.1f%% from last known (%.1f→%.1f TWh) "
                 "— switching to LinearTrend fallback",
-                deviation * 100, last_known, base_fc[0],
+                deviation * 100,
+                last_known,
+                base_fc[0],
             )
             base_fc = forecast_statistical(ts, "LinearTrend", len(base_fc))
-            std     = float(ts[-8:].std()) * 0.10
-            lo      = base_fc - 1.645 * std
-            hi      = base_fc + 1.645 * std
+            std = float(ts[-8:].std()) * 0.10
+            lo = base_fc - 1.645 * std
+            hi = base_fc + 1.645 * std
 
     return base_fc, lo, hi

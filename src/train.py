@@ -32,15 +32,15 @@ log = logging.getLogger(__name__)
 
 
 def train_model(
-    model:      nn.Module,
-    loader_tr:  DataLoader,
+    model: nn.Module,
+    loader_tr: DataLoader,
     loader_val: DataLoader,
-    epochs:     int   = 300,
-    patience:   int   = 40,
-    lr:         float = 1e-3,
-    device:     torch.device | None = None,
-    verbose:    bool  = False,
-    desc:       str   = "",
+    epochs: int = 300,
+    patience: int = 40,
+    lr: float = 1e-3,
+    device: torch.device | None = None,
+    verbose: bool = False,
+    desc: str = "",
 ) -> tuple[list[float], list[float], int]:
     """
     Train with Adam + MSE loss.
@@ -60,19 +60,17 @@ def train_model(
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model     = model.to(device)
-    opt       = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        opt, patience=15, factor=0.5, verbose=False
-    )
+    model = model.to(device)
+    opt = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(opt, patience=15, factor=0.5, verbose=False)
     criterion = nn.MSELoss()
 
-    best_val   = float("inf")
+    best_val = float("inf")
     best_state = copy.deepcopy(model.state_dict())
-    wait       = 0
-    tr_losses:  list[float] = []
+    wait = 0
+    tr_losses: list[float] = []
     val_losses: list[float] = []
-    epoch      = 0
+    epoch = 0
 
     for epoch in range(epochs):
         # ── Train ──────────────────────────────────────────────────────
@@ -95,10 +93,10 @@ def train_model(
         with torch.no_grad():
             for X_b, y_b in loader_val:
                 X_b, y_b = X_b.to(device), y_b.to(device)
-                pred    = model(X_b).squeeze(-1)
+                pred = model(X_b).squeeze(-1)
                 v_loss += criterion(pred, y_b).item() * len(X_b)
 
-        n_val  = len(loader_val.dataset) if len(loader_val.dataset) > 0 else 1
+        n_val = len(loader_val.dataset) if len(loader_val.dataset) > 0 else 1
         v_loss = v_loss / n_val if n_val > 0 else tr_loss
 
         tr_losses.append(tr_loss)
@@ -110,7 +108,7 @@ def train_model(
 
         # ── Early stopping ─────────────────────────────────────────────
         if v_loss < best_val - 1e-6:
-            best_val   = v_loss
+            best_val = v_loss
             best_state = copy.deepcopy(model.state_dict())
             wait = 0
         else:
@@ -123,12 +121,12 @@ def train_model(
 
 
 def log_dl_run_to_mlflow(
-    country:     str,
-    model_name:  str,
-    metrics:     dict,
-    params:      dict,
-    run_name:    str | None = None,
-    experiment:  str = "ember-demand-forecasting",
+    country: str,
+    model_name: str,
+    metrics: dict,
+    params: dict,
+    run_name: str | None = None,
+    experiment: str = "ember-demand-forecasting",
 ) -> None:
     """
     Log one DL walk-forward result to MLflow.
@@ -138,10 +136,11 @@ def log_dl_run_to_mlflow(
     """
     try:
         import mlflow  # lazy import — optional dependency
+
         mlflow.set_experiment(experiment)
         run_name = run_name or f"{country}_{model_name}_DL"
         with mlflow.start_run(run_name=run_name):
-            mlflow.set_tag("country",    country)
+            mlflow.set_tag("country", country)
             mlflow.set_tag("model_type", "deep_learning")
             mlflow.set_tag("model_name", model_name)
             mlflow.log_params(params)
@@ -153,27 +152,26 @@ def log_dl_run_to_mlflow(
 
 
 def log_all_dl_to_mlflow(
-    dl_metrics:  "pd.DataFrame",
-    params:      dict,
-    experiment:  str = "ember-demand-forecasting",
+    dl_metrics: pd.DataFrame,
+    params: dict,
+    experiment: str = "ember-demand-forecasting",
 ) -> None:
     """
     Log all DL benchmarking results to MLflow — one run per (country, model).
     Mirrors mlflow_config.log_dl_model_metrics() logic.
     """
-    import pandas as pd
 
     for _, row in dl_metrics.iterrows():
         metrics = {
-            "MAE":   row.get("MAE",   float("nan")),
-            "RMSE":  row.get("RMSE",  float("nan")),
-            "MAPE":  row.get("MAPE",  float("nan")),
+            "MAE": row.get("MAE", float("nan")),
+            "RMSE": row.get("RMSE", float("nan")),
+            "MAPE": row.get("MAPE", float("nan")),
             "SMAPE": row.get("SMAPE", float("nan")),
         }
         log_dl_run_to_mlflow(
-            country    = row["Country"],
-            model_name = row["Model"],
-            metrics    = metrics,
-            params     = params,
-            experiment = experiment,
+            country=row["Country"],
+            model_name=row["Model"],
+            metrics=metrics,
+            params=params,
+            experiment=experiment,
         )

@@ -27,11 +27,11 @@ DROP_COLS = ["Total", "Aggregate_fuel"]   # dropped after pivot in 02_preprocess
 
 # Subcategory names AFTER RENAMING (spaces→_, slashes→_) — EXCLUDING DROP_COLS
 SUBCATS_RENAMED = [
-    "Demand", "CO2_intensity", "Fuel", "Electricity_imports"
+    "Demand", "CO2_intensity", "Demand_per_capita", "Fuel", "Electricity_imports"
 ]
 # Original names as they appear in ember_filtered.csv — including ones that get dropped
 SUBCATS_RAW = [
-    "Demand", "CO2 intensity", "Total", "Fuel", "Electricity imports"
+    "Demand", "CO2 intensity", "Demand per capita", "Total", "Fuel", "Electricity imports"
 ]
 
 

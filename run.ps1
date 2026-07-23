@@ -16,8 +16,8 @@ param(
     [string]$Command = "help",
 
     [string]$Csv            = "data\ember_yearly_full_release_long_format.csv",
-    [int]   $TrainUntil     = 2019,
-    [int]   $ForecastUntil  = 2025,
+    [int]   $TrainUntil     = 2016,
+    [int]   $ForecastUntil  = 2030,
     [string]$Registry       = "ghcr.io/your-org",
     [string]$ImageTag       = "latest",
     [string]$Namespace      = "ember-pipeline",
@@ -185,13 +185,13 @@ switch ($Command) {
 
     "run-eda" {
         Invoke-Step "EDA" {
-            python src\01_eda.py --csv $Csv --output_dir outputs\eda
+            python src\step01_eda.py --csv $Csv --output_dir outputs\eda
         }
     }
 
     "run-preprocessing" {
         Invoke-Step "Preprocessing" {
-            python src\02_preprocessing.py `
+            python src\step02_preprocessing.py `
                 --input_dir  outputs\eda `
                 --output_dir outputs\preprocessing
         }
@@ -200,7 +200,7 @@ switch ($Command) {
     "run-modeling" {
         Invoke-Step "Modeling" {
             $env:MLFLOW_TRACKING_URI = "http://localhost:$MlflowPort"
-            python src\03_modeling.py `
+            python src\step03_modeling.py `
                 --input_dir  outputs\preprocessing `
                 --output_dir outputs\modeling
         }
@@ -209,7 +209,7 @@ switch ($Command) {
     "run-forecasting" {
         Invoke-Step "Forecasting" {
             $env:MLFLOW_TRACKING_URI = "http://localhost:$MlflowPort"
-            python src\04_forecasting.py `
+            python src\step04_forecasting.py `
                 --pre_dir        outputs\preprocessing `
                 --model_dir      outputs\modeling `
                 --output_dir     outputs\forecasting `

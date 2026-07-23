@@ -17,11 +17,11 @@ COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwa
 TARGET    = "Demand"
 # Renamed subcategories (spaces→_, slashes→_) matching 02_preprocessing.py
 SUBCATS_RENAMED = [
-    "Demand", "CO2_intensity", "Fuel", "Electricity_imports"
+    "Demand", "CO2_intensity", "Demand_per_capita", "Fuel", "Electricity_imports"
 ]
 # Raw subcategory names as they appear in ember_filtered.csv
 SUBCATS_RAW = [
-    "Demand", "CO2 intensity", "Fuel", "Electricity imports"
+    "Demand", "CO2 intensity", "Demand per capita", "Fuel", "Electricity imports"
 ]
 YEARS     = list(range(2000, 2025))
 TRAIN_END = 2016
@@ -102,6 +102,7 @@ def model_ready_df():
                 "Year":             year,
                 "Demand":           round(demand, 3),
                 "CO2_intensity":    round(0.4 + np.random.normal(0, 0.01), 4),
+                "Demand_per_capita": round(demand / 8.0 + np.random.normal(0, 0.05), 3),
                 "Fuel":             round(demand * 0.3 + np.random.normal(0, 0.1), 3),
                 "Electricity_imports": round(demand * 0.05 + np.random.normal(0, 0.05), 3),
                 "Demand_lag1":      round(demand * 0.98, 3),
@@ -134,8 +135,8 @@ def feature_meta(model_ready_df, tmp_path_factory):
                      "Demand_lag1", "Demand_lag2", "Demand_lag3",
                      "Demand_ma3", "Demand_ma5"]
     ]
-    all_subs     = ["Demand", "CO2_intensity", "Fuel", "Electricity_imports"]
-    raw_features = ["CO2_intensity", "Fuel", "Electricity_imports"]
+    all_subs     = ["Demand", "CO2_intensity", "Demand_per_capita", "Fuel", "Electricity_imports"]
+    raw_features = ["CO2_intensity", "Demand_per_capita", "Fuel", "Electricity_imports"]
 
     meta = {
         # Lowercase keys (notebook-compatible)

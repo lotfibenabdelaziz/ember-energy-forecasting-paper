@@ -34,8 +34,8 @@ log = logging.getLogger(__name__)
 # even severe shocks (COVID-19, 1973 oil crisis) rarely exceed 8-10% YoY.
 # A model exceeding these bounds is extrapolating into physically
 # implausible territory, not modeling a plausible future.
-WATCH_THRESHOLD    = 20.0   # % max deviation from last known value
-UNSTABLE_THRESHOLD = 40.0   # % max deviation from last known value
+WATCH_THRESHOLD = 20.0  # % max deviation from last known value
+UNSTABLE_THRESHOLD = 40.0  # % max deviation from last known value
 
 
 def compute_robustness_score(
@@ -62,7 +62,7 @@ def compute_robustness_score(
     rows = []
 
     for (country, model), grp in forecast_df.groupby(["Country", "Model"]):
-        grp  = grp.sort_values("Year")
+        grp = grp.sort_values("Year")
         vals = grp["Forecast"].values.astype(float)
         base = last_known.get(country)
 
@@ -76,7 +76,7 @@ def compute_robustness_score(
         # Max year-over-year jump within the forecast itself — catches
         # trajectories that are locally unstable even if the endpoint
         # looks reasonable (e.g. a V-shaped collapse-and-recover).
-        yoy     = np.diff(vals) / np.abs(vals[:-1] + 1e-9)
+        yoy = np.diff(vals) / np.abs(vals[:-1] + 1e-9)
         max_yoy = float(np.max(np.abs(yoy)) * 100) if len(yoy) else 0.0
 
         # Overall volatility of the 6-year path.
@@ -85,10 +85,10 @@ def compute_robustness_score(
         # Direction flips — a plausible trend rarely reverses direction
         # more than once; repeated flips indicate an unstable recursive
         # feedback loop rather than a genuine trend change.
-        diffs   = np.diff(vals)
-        signs   = np.sign(diffs)
-        signs   = signs[signs != 0]
-        flips   = int(np.sum(np.diff(signs) != 0)) if len(signs) > 1 else 0
+        diffs = np.diff(vals)
+        signs = np.sign(diffs)
+        signs = signs[signs != 0]
+        flips = int(np.sum(np.diff(signs) != 0)) if len(signs) > 1 else 0
 
         if max_dev > UNSTABLE_THRESHOLD:
             flag = "UNSTABLE"
@@ -97,15 +97,17 @@ def compute_robustness_score(
         else:
             flag = "STABLE"
 
-        rows.append({
-            "Country":                   country,
-            "Model":                     model,
-            "max_deviation_pct":         round(max_dev, 1),
-            "max_yoy_change_pct":        round(max_yoy, 1),
-            "trajectory_std":            round(traj_std, 1),
-            "direction_flips":           flips,
-            "robustness_flag":           flag,
-        })
+        rows.append(
+            {
+                "Country": country,
+                "Model": model,
+                "max_deviation_pct": round(max_dev, 1),
+                "max_yoy_change_pct": round(max_yoy, 1),
+                "trajectory_std": round(traj_std, 1),
+                "direction_flips": flips,
+                "robustness_flag": flag,
+            }
+        )
 
     result = pd.DataFrame(rows)
     if result.empty:
@@ -141,18 +143,25 @@ def robustness_vs_accuracy(
         how="left",
     )
 
-    merged["accuracy_rank"]    = merged.groupby("Country")["MAPE"].rank(method="min")
-    merged["robustness_rank"]  = merged.groupby("Country")["max_deviation_pct"].rank(method="min")
+    merged["accuracy_rank"] = merged.groupby("Country")["MAPE"].rank(method="min")
+    merged["robustness_rank"] = merged.groupby("Country")["max_deviation_pct"].rank(method="min")
 
     # "Axes agree" if a model ranks similarly on both — a large gap between
     # ranks is exactly the accurate-but-unstable (or the reverse) case that
     # motivated this whole module.
-    merged["rank_gap"]   = (merged["accuracy_rank"] - merged["robustness_rank"]).abs()
+    merged["rank_gap"] = (merged["accuracy_rank"] - merged["robustness_rank"]).abs()
     merged["axes_agree"] = merged["rank_gap"] <= 2
 
     cols = [
-        "Country", "Model", "MAPE", "max_deviation_pct", "max_yoy_change_pct",
-        "robustness_flag", "accuracy_rank", "robustness_rank", "axes_agree",
+        "Country",
+        "Model",
+        "MAPE",
+        "max_deviation_pct",
+        "max_yoy_change_pct",
+        "robustness_flag",
+        "accuracy_rank",
+        "robustness_rank",
+        "axes_agree",
     ]
     return merged[cols].sort_values(["Country", "accuracy_rank"]).reset_index(drop=True)
 
@@ -186,9 +195,17 @@ def flag_best_model_conflicts(
         log.warning(
             "%d/%d 'best' models (by MAPE) flagged WATCH/UNSTABLE on robustness — "
             "accuracy alone would have hidden this",
-            n_conflicts, len(merged),
+            n_conflicts,
+            len(merged),
         )
 
-    return merged[[
-        "Country", "Model", "MAPE", "robustness_flag", "max_deviation_pct", "conflict",
-    ]].rename(columns={"Model": "Best_Model"})
+    return merged[
+        [
+            "Country",
+            "Model",
+            "MAPE",
+            "robustness_flag",
+            "max_deviation_pct",
+            "conflict",
+        ]
+    ].rename(columns={"Model": "Best_Model"})

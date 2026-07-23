@@ -38,6 +38,7 @@ ignore = [
     "RUF012", # mutable class attributes (dataclasses handle this)
     "RUF001",
     "RUF005",
+    "N817",
 ]
 
 # Allow these in tests only

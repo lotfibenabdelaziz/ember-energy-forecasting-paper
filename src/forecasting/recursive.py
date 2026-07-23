@@ -10,7 +10,17 @@ from sklearn.preprocessing import StandardScaler
 
 from src.forecasting.forecasters import clean_x, extrapolate_exog, forecast_statistical
 
-STAT_MODELS = {"Naive", "Naïve", "LinearTrend", "Holt", "DampedHolt", "ARIMA(1,1,1)", "ARIMA_1_1_1", "SARIMA", "Theta"}
+STAT_MODELS = {
+    "Naive",
+    "Naïve",
+    "LinearTrend",
+    "Holt",
+    "DampedHolt",
+    "ARIMA(1,1,1)",
+    "ARIMA_1_1_1",
+    "SARIMA",
+    "Theta",
+}
 
 
 def _build_future_row(

@@ -17,6 +17,7 @@ import warnings
 # ── Windows home/cache-dir fix — see src/config.py for full explanation ──────
 if os.name == "nt":
     import tempfile
+
     _fallback_dir = tempfile.gettempdir()
     os.environ.setdefault("USERPROFILE", _fallback_dir)
     os.environ.setdefault("LOCALAPPDATA", _fallback_dir)

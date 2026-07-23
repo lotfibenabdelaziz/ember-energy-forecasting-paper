@@ -73,16 +73,16 @@ METRICS_CSV = _ROOT / "modeling" / "test_benchmarking.csv"
 GROWTH_CSV = _ROOT / "forecasting" / "demand_growth_summary.csv"
 BEST_MODELS_CSV = _ROOT / "modeling" / "best_models.csv"
 BENCHMARKING_CSV = _ROOT / "modeling" / "test_benchmarking.csv"
-SIGNIFICANCE_TESTS_CSV   = _ROOT / "modeling" / "significance_tests.csv"
+SIGNIFICANCE_TESTS_CSV = _ROOT / "modeling" / "significance_tests.csv"
 SIGNIFICANCE_SUMMARY_CSV = _ROOT / "modeling" / "significance_summary.csv"
-ROBUSTNESS_SUMMARY_CSV   = _ROOT / "forecasting" / "robustness_summary.csv"
+ROBUSTNESS_SUMMARY_CSV = _ROOT / "forecasting" / "robustness_summary.csv"
 ROBUSTNESS_VS_ACCURACY_CSV = _ROOT / "forecasting" / "robustness_vs_accuracy.csv"
-BEST_MODEL_CONFLICTS_CSV   = _ROOT / "forecasting" / "best_model_conflicts.csv"
+BEST_MODEL_CONFLICTS_CSV = _ROOT / "forecasting" / "best_model_conflicts.csv"
 DL_FORECAST_CSV = _ROOT / "deeplearning" / "dl_forecast_2025_2030.csv"
 DL_METRICS_CSV = _ROOT / "deeplearning" / "dl_benchmarking.csv"
-DL_BEST_CSV  = _ROOT / "deeplearning" / "dl_best_models.csv"
-HISTORY_CSV  = _ROOT / "preprocessing" / "ember_model_ready.csv"
-SUBCATEGORY_CSV   = _ROOT / "eda" / "ember_filtered.csv"
+DL_BEST_CSV = _ROOT / "deeplearning" / "dl_best_models.csv"
+HISTORY_CSV = _ROOT / "preprocessing" / "ember_model_ready.csv"
+SUBCATEGORY_CSV = _ROOT / "eda" / "ember_filtered.csv"
 SUMMARY_STATS_CSV = _ROOT / "eda" / "table01_eda_statistics.csv"
 
 FIGURES_DIRS = [
@@ -123,13 +123,13 @@ def _load_all() -> dict[str, pd.DataFrame]:
         "benchmark": _load(BENCHMARKING_CSV, "benchmark"),
         "dl_forecast": _load(DL_FORECAST_CSV, "dl_forecast"),
         "dl_metrics": _load(DL_METRICS_CSV, "dl_metrics"),
-        "dl_best":  _load(DL_BEST_CSV,  "dl_best"),
-        "significance_tests":   _load(SIGNIFICANCE_TESTS_CSV,   "significance_tests"),
+        "dl_best": _load(DL_BEST_CSV, "dl_best"),
+        "significance_tests": _load(SIGNIFICANCE_TESTS_CSV, "significance_tests"),
         "significance_summary": _load(SIGNIFICANCE_SUMMARY_CSV, "significance_summary"),
-        "robustness_summary":       _load(ROBUSTNESS_SUMMARY_CSV,       "robustness_summary"),
-        "robustness_vs_accuracy":   _load(ROBUSTNESS_VS_ACCURACY_CSV,   "robustness_vs_accuracy"),
-        "best_model_conflicts":     _load(BEST_MODEL_CONFLICTS_CSV,     "best_model_conflicts"),
-        "history":  _load(HISTORY_CSV,  "history"),
+        "robustness_summary": _load(ROBUSTNESS_SUMMARY_CSV, "robustness_summary"),
+        "robustness_vs_accuracy": _load(ROBUSTNESS_VS_ACCURACY_CSV, "robustness_vs_accuracy"),
+        "best_model_conflicts": _load(BEST_MODEL_CONFLICTS_CSV, "best_model_conflicts"),
+        "history": _load(HISTORY_CSV, "history"),
         "subcategories": _load(SUBCATEGORY_CSV, "subcategories"),
         "summary_stats": _load(SUMMARY_STATS_CSV, "summary_stats"),
     }
@@ -413,26 +413,26 @@ def get_dl_forecast(country: str) -> dict:
 # ── Classical metrics ─────────────────────────────────────────────────────────
 
 
-
 @app.get("/history/{country}", tags=["forecast"], dependencies=[Depends(get_current_user)])
 def get_history(country: str) -> dict:
     """Historical electricity demand 2000-2024 with event annotations."""
     country = _validate_country(country)
-    df      = _require(_DATA["history"], "History")
-    sub     = df[df["Area"] == country].sort_values("Year")
+    df = _require(_DATA["history"], "History")
+    sub = df[df["Area"] == country].sort_values("Year")
     if sub.empty:
         raise HTTPException(404, f"No history data for {country}")
     events = [
         {"year": 2009, "label": "2008 Financial crisis", "color": "#6b7280"},
-        {"year": 2020, "label": "COVID-19 pandemic",     "color": "#e63946"},
-        {"year": 2022, "label": "Ukraine-Russia war",     "color": "#ff9f1c"},
+        {"year": 2020, "label": "COVID-19 pandemic", "color": "#e63946"},
+        {"year": 2022, "label": "Ukraine-Russia war", "color": "#ff9f1c"},
     ]
     return {
-        "country":    country,
-        "years":      sub["Year"].tolist(),
+        "country": country,
+        "years": sub["Year"].tolist(),
         "demand_twh": [round(float(v), 3) for v in sub["Demand"].tolist()],
-        "events":     events,
+        "events": events,
     }
+
 
 # ── Data Overview (presentation) ──────────────────────────────────────────────
 
@@ -480,14 +480,17 @@ def get_subcategories_all() -> dict:
         for country in COUNTRIES:
             c_sub = (
                 sub_df[sub_df["Area"] == country]
-                .groupby("Year", as_index=False)["Value"].mean()
+                .groupby("Year", as_index=False)["Value"]
+                .mean()
                 .sort_values("Year")
             )
             if c_sub.empty:
                 continue
             countries_data[country] = {
                 "years": c_sub["Year"].tolist(),
-                "values": [round(float(v), 3) if pd.notna(v) else None for v in c_sub["Value"].tolist()],
+                "values": [
+                    round(float(v), 3) if pd.notna(v) else None for v in c_sub["Value"].tolist()
+                ],
             }
         result[subcat] = {"unit": unit, "countries": countries_data}
 
@@ -501,14 +504,17 @@ def get_subcategories_all() -> dict:
         for country in COUNTRIES:
             c_sub = (
                 fuel_df[fuel_df["Area"] == country]
-                .groupby("Year", as_index=False)["Value"].sum()
+                .groupby("Year", as_index=False)["Value"]
+                .sum()
                 .sort_values("Year")
             )
             if c_sub.empty:
                 continue
             countries_data[country] = {
                 "years": c_sub["Year"].tolist(),
-                "values": [round(float(v), 3) if pd.notna(v) else None for v in c_sub["Value"].tolist()],
+                "values": [
+                    round(float(v), 3) if pd.notna(v) else None for v in c_sub["Value"].tolist()
+                ],
             }
         result["Total Generation Capacity"] = {"unit": unit, "countries": countries_data}
     return {"subcategories": result}
@@ -654,7 +660,9 @@ def get_robustness(country: str) -> dict:
     if not combo.empty:
         combo_sub = combo[combo["Country"] == country]
         if not combo_sub.empty:
-            result["accuracy_vs_robustness"] = combo_sub.drop(columns=["Country"]).to_dict(orient="records")
+            result["accuracy_vs_robustness"] = combo_sub.drop(columns=["Country"]).to_dict(
+                orient="records"
+            )
 
     return result
 

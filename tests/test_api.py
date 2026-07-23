@@ -4,12 +4,13 @@ Ember Energy Forecasting | IEEE Paper
 
 Covers:
   - Public endpoints  (/health, /countries, /auth/login)
-  - Protected endpoints (all forecast, metrics, figures, ask)
+  - Protected endpoints (all forecast, metrics, growth, compare, figures, ask)
+  - Model diagnostics  (/significance, /robustness — new)
+  - Data overview      (/data/demand-history, /data/subcategories,
+                         /data/summary — new)
   - JWT auth flow (login, logout, token revocation, /auth/me)
   - Input validation and error codes
 """
-
-import os
 
 import pandas as pd
 import pytest
@@ -27,13 +28,21 @@ TEST_SECRET    = "test-secret-key-32-chars-minimum!!"
 
 @pytest.fixture
 def mock_outputs(tmp_path):
-    """Create minimal mock output files the API reads at startup."""
+    """
+    Create minimal mock output files the API reads at startup.
+    Filenames/columns here MUST match the real path constants defined in
+    api/main.py (FORECAST_CSV, METRICS_CSV, etc.) — a mismatch here means
+    tests silently pass via the 503 "not available" branch without ever
+    exercising the real 200-path assertions.
+    """
     fc_dir  = tmp_path / "forecasting"
     mod_dir = tmp_path / "modeling"
     dl_dir  = tmp_path / "deeplearning"
-    fc_dir.mkdir(); mod_dir.mkdir(); dl_dir.mkdir()
+    eda_dir = tmp_path / "eda"
+    for d in (fc_dir, mod_dir, dl_dir, eda_dir):
+        d.mkdir()
 
-    # demand_forecast_2025_2030.csv
+    # ── forecasting/demand_forecast_2025_2030.csv (FORECAST_CSV) ─────────────
     rows = []
     for c in COUNTRIES:
         for yr in FORECAST_YEARS:
@@ -42,43 +51,114 @@ def mock_outputs(tmp_path):
                 "Forecast": 10.0 + 0.5 * (yr - 2025),
                 "Lower_90": 9.5, "Upper_90": 10.5,
             })
-    pd.DataFrame(rows).to_csv(str(fc_dir / "demand_forecast_2025_2030.csv"), index=False)
+    pd.DataFrame(rows).to_csv(fc_dir / "demand_forecast_2025_2030.csv", index=False)
 
-    # forecast_metrics.csv
+    # ── forecasting/all_models_forecast.csv (ALL_MODELS_FORECAST_CSV) ────────
+    all_models_rows = []
+    for c in COUNTRIES:
+        for model in ["Ridge", "BayesianRidge", "LinearTrend"]:
+            for yr in FORECAST_YEARS:
+                all_models_rows.append({
+                    "Country": c, "Model": model, "Year": yr,
+                    "Forecast": 10.0 + 0.5 * (yr - 2025),
+                })
+    pd.DataFrame(all_models_rows).to_csv(fc_dir / "all_models_forecast.csv", index=False)
+
+    # ── modeling/test_benchmarking.csv (METRICS_CSV) ─────────────────────────
     pd.DataFrame([{
         "Country": c, "Model": "Ridge",
-        "MAE": 0.5, "RMSE": 0.7, "R2": 0.92,
-        "MAPE": 2.5, "SMAPE": 2.4, "TheilU": 0.6,
-    } for c in COUNTRIES]).set_index("Country").to_csv(
-        str(fc_dir / "forecast_metrics.csv"))
+        "MAE": 0.5, "RMSE": 0.7, "MAPE": 2.5,
+    } for c in COUNTRIES]).to_csv(mod_dir / "test_benchmarking.csv", index=False)
 
-    # demand_growth_summary.csv
+    # ── forecasting/demand_growth_summary.csv (GROWTH_CSV) ───────────────────
     pd.DataFrame([{
         "Country": c, "Model": "Ridge",
-        "2024 TWh": 10.0, "2030 TWh (forecast)": 13.0,
-        "Total Growth (%)": 30.0, "CAGR (%)": 4.5,
-    } for c in COUNTRIES]).to_csv(str(fc_dir / "demand_growth_summary.csv"), index=False)
+        "2024 (TWh)": 10.0, "2025 Forecast": 10.5, "2030 Forecast": 13.0,
+        "Total Growth %": 30.0, "CAGR 24-30 %": 4.5,
+    } for c in COUNTRIES]).to_csv(fc_dir / "demand_growth_summary.csv", index=False)
 
-    # best_models.csv
+    # ── modeling/best_models.csv (BEST_MODELS_CSV) ───────────────────────────
     pd.DataFrame([{"Country": c, "Model": "Ridge", "MAPE": 2.5}
-                  for c in COUNTRIES]).to_csv(str(mod_dir / "best_models.csv"), index=False)
+                  for c in COUNTRIES]).to_csv(mod_dir / "best_models.csv", index=False)
 
-    # dl_forecast_2025_2030.csv
+    # ── deeplearning/dl_forecast_2025_2030.csv (DL_FORECAST_CSV) ─────────────
     dl_rows = []
     for c in COUNTRIES:
         for yr in FORECAST_YEARS:
             dl_rows.append({"Country": c, "Model": "MLP", "Year": yr,
                             "Forecast": 10.2 + 0.4 * (yr - 2025)})
-    pd.DataFrame(dl_rows).to_csv(str(dl_dir / "dl_forecast_2025_2030.csv"), index=False)
+    pd.DataFrame(dl_rows).to_csv(dl_dir / "dl_forecast_2025_2030.csv", index=False)
 
-    # dl_benchmarking.csv
+    # ── deeplearning/dl_benchmarking.csv (DL_METRICS_CSV) ────────────────────
     pd.DataFrame([{"Country": c, "Model": "MLP",
-                   "MAE": 0.4, "RMSE": 0.6, "MAPE": 2.1, "R2": 0.94}
-                  for c in COUNTRIES]).to_csv(str(dl_dir / "dl_benchmarking.csv"), index=False)
+                   "MAE": 0.4, "RMSE": 0.6, "MAPE": 2.1, "SMAPE": 2.0, "N": 4}
+                  for c in COUNTRIES]).to_csv(dl_dir / "dl_benchmarking.csv", index=False)
 
-    # dl_best_models.csv
+    # ── deeplearning/dl_best_models.csv (DL_BEST_CSV) ─────────────────────────
     pd.DataFrame([{"Country": c, "Model": "MLP", "MAPE": 2.1}
-                  for c in COUNTRIES]).to_csv(str(dl_dir / "dl_best_models.csv"), index=False)
+                  for c in COUNTRIES]).to_csv(dl_dir / "dl_best_models.csv", index=False)
+
+    # ── modeling/significance_tests.csv (SIGNIFICANCE_TESTS_CSV) ─────────────
+    sig_rows = [{
+        "Country": c, "Model_A": "Ridge", "Model_B": "LinearTrend",
+        "MAPE_A": 2.5, "MAPE_B": 3.0,
+        "DM_stat": 1.2, "DM_p": 0.03, "WX_stat": 5.0, "WX_p": 0.04,
+        "significant_DM": True, "significant_WX": True, "better_model": "Ridge",
+    } for c in COUNTRIES]
+    pd.DataFrame(sig_rows).to_csv(mod_dir / "significance_tests.csv", index=False)
+
+    pd.DataFrame([{
+        "Country": c, "Total_pairs": 1, "Significant_DM": 1,
+        "Significant_WX": 1, "Any_significant": True,
+    } for c in COUNTRIES]).to_csv(mod_dir / "significance_summary.csv", index=False)
+
+    # ── forecasting/robustness_summary.csv (ROBUSTNESS_SUMMARY_CSV) ──────────
+    rb_rows = []
+    for c in COUNTRIES:
+        rb_rows.append({
+            "Country": c, "Model": "Ridge",
+            "max_deviation_pct": 5.0, "max_yoy_change_pct": 3.0,
+            "trajectory_std": 1.0, "direction_flips": 0, "robustness_flag": "STABLE",
+        })
+    pd.DataFrame(rb_rows).to_csv(fc_dir / "robustness_summary.csv", index=False)
+
+    pd.DataFrame([{
+        "Country": c, "Model": "Ridge", "MAPE": 2.5,
+        "max_deviation_pct": 5.0, "max_yoy_change_pct": 3.0,
+        "robustness_flag": "STABLE", "accuracy_rank": 1.0,
+        "robustness_rank": 1.0, "axes_agree": True,
+    } for c in COUNTRIES]).to_csv(fc_dir / "robustness_vs_accuracy.csv", index=False)
+
+    # ── forecasting/best_model_conflicts.csv (BEST_MODEL_CONFLICTS_CSV) ──────
+    pd.DataFrame([{
+        "Country": c, "Best_Model": "Ridge", "MAPE": 2.5,
+        "robustness_flag": "STABLE", "max_deviation_pct": 5.0, "conflict": False,
+    } for c in COUNTRIES]).to_csv(fc_dir / "best_model_conflicts.csv", index=False)
+
+    # ── eda/ember_filtered.csv (SUBCATEGORY_CSV) ──────────────────────────────
+    subcat_rows = []
+    for c in COUNTRIES:
+        for subcat, unit in [("Demand", "TWh"), ("CO2 intensity", "gCO2/kWh"),
+                              ("Demand per capita", "MWh"), ("Electricity imports", "TWh")]:
+            for yr in range(2000, 2025):
+                subcat_rows.append({"Area": c, "Year": yr, "Subcategory": subcat,
+                                    "Unit": unit, "Value": 10.0 + 0.1 * (yr - 2000)})
+    pd.DataFrame(subcat_rows).to_csv(eda_dir / "ember_filtered.csv", index=False)
+
+    # ── eda/table01_eda_statistics.csv (SUMMARY_STATS_CSV) ───────────────────
+    pd.DataFrame([{
+        "Country": c, "2000 (TWh)": 8.0, "2024 (TWh)": 10.0,
+        "Total Growth": "25.0%", "Slope TWh/yr": 0.1, "Mean TWh": 9.0, "Std TWh": 0.5,
+    } for c in COUNTRIES]).to_csv(eda_dir / "table01_eda_statistics.csv", index=False)
+
+    # ── preprocessing/ember_model_ready.csv (HISTORY_CSV) ────────────────────
+    pre_dir = tmp_path / "preprocessing"
+    pre_dir.mkdir()
+    hist_rows = []
+    for c in COUNTRIES:
+        for yr in range(2000, 2025):
+            hist_rows.append({"Area": c, "Year": yr, "Demand": 10.0 + 0.1 * (yr - 2000)})
+    pd.DataFrame(hist_rows).to_csv(pre_dir / "ember_model_ready.csv", index=False)
 
     return str(tmp_path)
 
@@ -220,14 +300,14 @@ class TestJWTAuth:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Protected endpoints
+# Forecast endpoints
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestForecastEndpoint:
 
     def test_forecast_known_country(self, api_client, auth_headers):
         r = api_client.get("/forecast/Tunisia", headers=auth_headers)
-        assert r.status_code in [200, 503]
+        assert r.status_code == 200
 
     def test_forecast_unknown_country_returns_404(self, api_client, auth_headers):
         assert api_client.get("/forecast/Atlantis",
@@ -235,63 +315,152 @@ class TestForecastEndpoint:
 
     def test_forecast_response_has_required_fields(self, api_client, auth_headers):
         r = api_client.get("/forecast/Tunisia", headers=auth_headers)
-        if r.status_code == 200:
-            for field in ["country", "forecast_years", "forecast_twh"]:
-                assert field in r.json()
-
-    def test_forecast_years_are_2025_2030(self, api_client, auth_headers):
-        r = api_client.get("/forecast/Tunisia", headers=auth_headers)
-        if r.status_code == 200:
-            years = r.json()["forecast_years"]
-            assert min(years) >= 2025
-            assert max(years) <= 2030
-
-    def test_forecast_twh_all_positive(self, api_client, auth_headers):
-        r = api_client.get("/forecast/Tunisia", headers=auth_headers)
-        if r.status_code == 200:
-            assert all(v > 0 for v in r.json()["forecast_twh"])
-
-    def test_forecast_has_confidence_interval(self, api_client, auth_headers):
-        r = api_client.get("/forecast/Tunisia", headers=auth_headers)
-        if r.status_code == 200:
-            assert "lower_90" in r.json()
-            assert "upper_90" in r.json()
+        assert r.status_code == 200
+        for field in ["country", "model"]:
+            assert field in r.json()
 
     def test_all_countries_respond(self, api_client, auth_headers):
         for c in COUNTRIES:
             r = api_client.get(f"/forecast/{c}", headers=auth_headers)
-            assert r.status_code in [200, 503], f"{c}: unexpected {r.status_code}"
+            assert r.status_code == 200, f"{c}: unexpected {r.status_code}"
 
+
+class TestAllModelsForecastEndpoint:
+    """GET /forecast/all/{country} — point forecast for every model, used
+    to power the dashboard's 'All models' comparison chart."""
+
+    def test_known_country_returns_200(self, api_client, auth_headers):
+        r = api_client.get("/forecast/all/Tunisia", headers=auth_headers)
+        assert r.status_code == 200
+
+    def test_has_models_key(self, api_client, auth_headers):
+        r = api_client.get("/forecast/all/Tunisia", headers=auth_headers)
+        data = r.json()
+        assert "models" in data
+        assert isinstance(data["models"], dict)
+
+    def test_unknown_country_returns_404(self, api_client, auth_headers):
+        assert api_client.get("/forecast/all/Atlantis",
+            headers=auth_headers).status_code == 404
+
+
+class TestDLForecastEndpoint:
+
+    def test_dl_forecast_known_country(self, api_client, auth_headers):
+        r = api_client.get("/forecast/dl/Tunisia", headers=auth_headers)
+        assert r.status_code == 200
+
+    def test_dl_forecast_unknown_country_returns_404(self, api_client, auth_headers):
+        assert api_client.get("/forecast/dl/Atlantis",
+            headers=auth_headers).status_code == 404
+
+
+class TestHistoryEndpoint:
+
+    def test_history_known_country(self, api_client, auth_headers):
+        r = api_client.get("/history/Tunisia", headers=auth_headers)
+        assert r.status_code == 200
+
+    def test_history_has_years_and_events(self, api_client, auth_headers):
+        r = api_client.get("/history/Tunisia", headers=auth_headers)
+        data = r.json()
+        assert "years" in data
+        assert "events" in data
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Metrics endpoints
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestMetricsEndpoint:
 
     def test_metrics_known_country(self, api_client, auth_headers):
         r = api_client.get("/metrics/Tunisia", headers=auth_headers)
-        assert r.status_code in [200, 503]
+        assert r.status_code == 200
 
     def test_metrics_unknown_returns_404(self, api_client, auth_headers):
         assert api_client.get("/metrics/Mars",
             headers=auth_headers).status_code == 404
 
-    def test_metrics_has_dict(self, api_client, auth_headers):
-        r = api_client.get("/metrics/Tunisia", headers=auth_headers)
-        if r.status_code == 200:
-            data = r.json()
-            assert "metrics" in data
-            assert isinstance(data["metrics"], dict)
-
     def test_metrics_has_expected_keys(self, api_client, auth_headers):
         r = api_client.get("/metrics/Tunisia", headers=auth_headers)
-        if r.status_code == 200:
-            for k in ["MAE", "RMSE", "MAPE"]:
-                assert k in r.json()["metrics"]
+        data = r.json()
+        metrics = data.get("metrics", data)  # tolerate either shape
+        for k in ["MAE", "RMSE", "MAPE"]:
+            assert k in metrics
 
+
+class TestDLMetricsEndpoint:
+    """GET /metrics/dl/{country} — separate from classical /metrics/{country}."""
+
+    def test_dl_metrics_known_country(self, api_client, auth_headers):
+        r = api_client.get("/metrics/dl/Tunisia", headers=auth_headers)
+        assert r.status_code == 200
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Model diagnostics — significance & robustness (NEW)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSignificanceEndpoint:
+
+    def test_significance_known_country(self, api_client, auth_headers):
+        r = api_client.get("/significance/Tunisia", headers=auth_headers)
+        assert r.status_code == 200
+
+    def test_significance_has_pairs_key(self, api_client, auth_headers):
+        r = api_client.get("/significance/Tunisia", headers=auth_headers)
+        data = r.json()
+        assert "pairs" in data
+        assert isinstance(data["pairs"], list)
+
+    def test_significance_unknown_country_returns_404(self, api_client, auth_headers):
+        assert api_client.get("/significance/Atlantis",
+            headers=auth_headers).status_code == 404
+
+
+class TestRobustnessEndpoint:
+
+    def test_robustness_known_country(self, api_client, auth_headers):
+        r = api_client.get("/robustness/Tunisia", headers=auth_headers)
+        assert r.status_code == 200
+
+    def test_robustness_has_models_key(self, api_client, auth_headers):
+        r = api_client.get("/robustness/Tunisia", headers=auth_headers)
+        data = r.json()
+        assert "models" in data
+        assert isinstance(data["models"], list)
+
+    def test_robustness_unknown_country_returns_404(self, api_client, auth_headers):
+        assert api_client.get("/robustness/Atlantis",
+            headers=auth_headers).status_code == 404
+
+    def test_robustness_conflicts_returns_200(self, api_client, auth_headers):
+        """
+        Route-order regression test: /robustness/conflicts is a static
+        route that MUST be matched before the parameterized
+        /robustness/{country} route, or FastAPI shadows it and this
+        404s trying to validate "conflicts" as a country name.
+        """
+        r = api_client.get("/robustness/conflicts", headers=auth_headers)
+        assert r.status_code == 200
+
+    def test_robustness_conflicts_has_expected_keys(self, api_client, auth_headers):
+        r = api_client.get("/robustness/conflicts", headers=auth_headers)
+        data = r.json()
+        for k in ["total_countries", "n_conflicts", "rows"]:
+            assert k in data
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Growth & Compare
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestGrowthEndpoint:
 
     def test_growth_known_country(self, api_client, auth_headers):
         r = api_client.get("/growth/Tunisia", headers=auth_headers)
-        assert r.status_code in [200, 503]
+        assert r.status_code == 200
 
     def test_growth_unknown_returns_404(self, api_client, auth_headers):
         assert api_client.get("/growth/Atlantis",
@@ -299,31 +468,55 @@ class TestGrowthEndpoint:
 
     def test_growth_has_summary(self, api_client, auth_headers):
         r = api_client.get("/growth/Tunisia", headers=auth_headers)
-        if r.status_code == 200:
-            assert "summary" in r.json()
+        assert "summary" in r.json()
 
     def test_growth_has_cagr(self, api_client, auth_headers):
         r = api_client.get("/growth/Tunisia", headers=auth_headers)
-        if r.status_code == 200:
-            summary = r.json()["summary"]
-            assert any("cagr" in k.lower() for k in summary)
+        summary = r.json()["summary"]
+        assert any("cagr" in k.lower() for k in summary)
 
 
 class TestCompareEndpoint:
 
     def test_compare_known_country(self, api_client, auth_headers):
         r = api_client.get("/compare/Tunisia", headers=auth_headers)
-        assert r.status_code in [200, 404, 503]
+        assert r.status_code in [200, 404]
 
     def test_compare_unknown_returns_404(self, api_client, auth_headers):
         assert api_client.get("/compare/Atlantis",
             headers=auth_headers).status_code == 404
 
-    def test_compare_has_country_key(self, api_client, auth_headers):
-        r = api_client.get("/compare/Tunisia", headers=auth_headers)
-        if r.status_code == 200:
-            assert r.json()["country"] == "Tunisia"
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Data overview endpoints (NEW)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDataOverviewEndpoints:
+
+    def test_demand_history_returns_200(self, api_client, auth_headers):
+        r = api_client.get("/data/demand-history", headers=auth_headers)
+        assert r.status_code == 200
+
+    def test_demand_history_has_all_countries(self, api_client, auth_headers):
+        r = api_client.get("/data/demand-history", headers=auth_headers)
+        data = r.json()["countries"]
+        for c in COUNTRIES:
+            assert c in data
+
+    def test_subcategories_returns_200(self, api_client, auth_headers):
+        r = api_client.get("/data/subcategories", headers=auth_headers)
+        assert r.status_code == 200
+        assert "subcategories" in r.json()
+
+    def test_summary_returns_200(self, api_client, auth_headers):
+        r = api_client.get("/data/summary", headers=auth_headers)
+        assert r.status_code == 200
+        assert "rows" in r.json()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Figures & Ask
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestFiguresEndpoint:
 

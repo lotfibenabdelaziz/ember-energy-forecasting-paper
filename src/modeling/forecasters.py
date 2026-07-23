@@ -52,20 +52,6 @@ def arima_1step(train_series: pd.Series) -> float:
         return train_series.iloc[-1]
 
 
-def theta_1step(train_series: pd.Series) -> float:
-    """
-    Theta method — M3/M4 competition winner for annual/low-frequency series.
-    Decomposes into trend (θ=2) + level component, then recombines.
-    1-step forecast.
-    """
-    try:
-        from statsmodels.tsa.forecasting.theta import ThetaModel
-        m = ThetaModel(train_series.values, period=1).fit(use_mle=True)
-        return float(m.forecast(1).iloc[0])
-    except Exception:
-        return train_series.iloc[-1]
-
-
 def ml_1step(
     train_df: pd.DataFrame,
     test_row: pd.Series,
@@ -109,6 +95,7 @@ def ml_1step(
 #   Small samples:  Theta (M3/M4-proven for short series) adds real diversity
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def theta_1step(ts: pd.Series) -> float:
     """
     Theta method — M3/M4 competition winner.
@@ -117,6 +104,7 @@ def theta_1step(ts: pd.Series) -> float:
     """
     try:
         from statsmodels.tsa.forecasting.theta import ThetaModel
+
         m = ThetaModel(ts.values, period=1).fit(use_mle=True)
         return float(m.forecast(1).iloc[0])
     except Exception:
@@ -131,9 +119,9 @@ def damped_holt_strong_1step(ts: pd.Series) -> float:
     during forecast (structural demand decline needs forced damping).
     """
     try:
-        m = ExponentialSmoothing(
-            ts.values, trend="add", damped_trend=True
-        ).fit(optimized=True, damping_trend=0.85)
+        m = ExponentialSmoothing(ts.values, trend="add", damped_trend=True).fit(
+            optimized=True, damping_trend=0.85
+        )
         return float(m.forecast(1).iloc[0])
     except Exception:
         return float(ts.iloc[-1])
@@ -148,6 +136,7 @@ def sarima_1step(ts: pd.Series) -> float:
     """
     try:
         from statsmodels.tsa.statespace.sarimax import SARIMAX
+
         m = SARIMAX(
             ts.values,
             order=(1, 1, 1),

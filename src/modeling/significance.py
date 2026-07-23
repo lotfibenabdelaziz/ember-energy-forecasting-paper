@@ -3,14 +3,14 @@ src/modeling/significance.py
 Statistical significance tests for forecast comparison
 """
 
+from itertools import combinations
+
 import numpy as np
 import pandas as pd
 from scipy import stats
-from itertools import combinations
 
 
-def diebold_mariano(errors_a: np.ndarray, errors_b: np.ndarray,
-                    h: int = 1) -> tuple[float, float]:
+def diebold_mariano(errors_a: np.ndarray, errors_b: np.ndarray, h: int = 1) -> tuple[float, float]:
     """
     Diebold-Mariano test for equal predictive accuracy.
 
@@ -23,8 +23,8 @@ def diebold_mariano(errors_a: np.ndarray, errors_b: np.ndarray,
     -------
     (dm_stat, p_value)
     """
-    d   = errors_a**2 - errors_b**2   # loss differential
-    n   = len(d)
+    d = errors_a**2 - errors_b**2  # loss differential
+    n = len(d)
     d_bar = np.mean(d)
 
     # Newey-West variance estimate (accounts for autocorrelation)
@@ -34,7 +34,7 @@ def diebold_mariano(errors_a: np.ndarray, errors_b: np.ndarray,
     else:
         gamma1 = 0
 
-    var_d  = (gamma0 + 2 * gamma1) / n
+    var_d = (gamma0 + 2 * gamma1) / n
     if var_d <= 0:
         return 0.0, 1.0
 
@@ -43,8 +43,7 @@ def diebold_mariano(errors_a: np.ndarray, errors_b: np.ndarray,
     return float(dm_stat), float(p_value)
 
 
-def wilcoxon_test(errors_a: np.ndarray,
-                  errors_b: np.ndarray) -> tuple[float, float]:
+def wilcoxon_test(errors_a: np.ndarray, errors_b: np.ndarray) -> tuple[float, float]:
     """
     Wilcoxon signed-rank test for paired forecast errors.
     Non-parametric — no normality assumption.
@@ -56,15 +55,13 @@ def wilcoxon_test(errors_a: np.ndarray,
     if np.all(diff == 0):
         return 0.0, 1.0
     try:
-        stat, p = stats.wilcoxon(diff, zero_method="wilcox",
-                                  alternative="two-sided")
+        stat, p = stats.wilcoxon(diff, zero_method="wilcox", alternative="two-sided")
         return float(stat), float(p)
     except ValueError:
         return 0.0, 1.0
 
 
-def paired_ttest(errors_a: np.ndarray,
-                 errors_b: np.ndarray) -> tuple[float, float]:
+def paired_ttest(errors_a: np.ndarray, errors_b: np.ndarray) -> tuple[float, float]:
     """
     Paired t-test for mean error difference.
     Assumes normality — use only when n > 30.
@@ -95,7 +92,7 @@ def run_significance_tests(
     """
     rows = []
     for country, grp in wf_predictions.groupby("Country"):
-        models   = grp["Model"].unique()
+        models = grp["Model"].unique()
         if len(models) < 2:
             continue
 
@@ -104,9 +101,8 @@ def run_significance_tests(
             g_b = grp[grp["Model"] == m_b].sort_values("Year")
 
             # Align on same years
-            merged = g_a[["Year","y_actual","y_pred"]].merge(
-                g_b[["Year","y_pred"]].rename(columns={"y_pred":"y_pred_b"}),
-                on="Year"
+            merged = g_a[["Year", "y_actual", "y_pred"]].merge(
+                g_b[["Year", "y_pred"]].rename(columns={"y_pred": "y_pred_b"}), on="Year"
             )
             if len(merged) < 3:
                 continue
@@ -114,27 +110,29 @@ def run_significance_tests(
             err_a = (merged["y_actual"] - merged["y_pred"]).values
             err_b = (merged["y_actual"] - merged["y_pred_b"]).values
 
-            dm_stat, dm_p   = diebold_mariano(err_a, err_b)
-            wx_stat, wx_p   = wilcoxon_test(err_a, err_b)
+            dm_stat, dm_p = diebold_mariano(err_a, err_b)
+            wx_stat, wx_p = wilcoxon_test(err_a, err_b)
 
             mape_a = np.mean(np.abs(err_a / merged["y_actual"])) * 100
             mape_b = np.mean(np.abs(err_b / merged["y_actual"])) * 100
             better = m_a if mape_a < mape_b else m_b
 
-            rows.append({
-                "Country":        country,
-                "Model_A":        m_a,
-                "Model_B":        m_b,
-                "MAPE_A":         round(mape_a, 3),
-                "MAPE_B":         round(mape_b, 3),
-                "DM_stat":        round(dm_stat, 3),
-                "DM_p":           round(dm_p, 4),
-                "WX_stat":        round(wx_stat, 3),
-                "WX_p":           round(wx_p, 4),
-                "significant_DM": dm_p < alpha,
-                "significant_WX": wx_p < alpha,
-                "better_model":   better,
-            })
+            rows.append(
+                {
+                    "Country": country,
+                    "Model_A": m_a,
+                    "Model_B": m_b,
+                    "MAPE_A": round(mape_a, 3),
+                    "MAPE_B": round(mape_b, 3),
+                    "DM_stat": round(dm_stat, 3),
+                    "DM_p": round(dm_p, 4),
+                    "WX_stat": round(wx_stat, 3),
+                    "WX_p": round(wx_p, 4),
+                    "significant_DM": dm_p < alpha,
+                    "significant_WX": wx_p < alpha,
+                    "better_model": better,
+                }
+            )
 
     return pd.DataFrame(rows)
 
@@ -148,11 +146,13 @@ def significance_summary(results: pd.DataFrame) -> pd.DataFrame:
         sig_dm = grp[grp["significant_DM"]]
         sig_wx = grp[grp["significant_WX"]]
 
-        rows.append({
-            "Country":           country,
-            "Total_pairs":       len(grp),
-            "Significant_DM":    len(sig_dm),
-            "Significant_WX":    len(sig_wx),
-            "Any_significant":   len(sig_dm) > 0 or len(sig_wx) > 0,
-        })
+        rows.append(
+            {
+                "Country": country,
+                "Total_pairs": len(grp),
+                "Significant_DM": len(sig_dm),
+                "Significant_WX": len(sig_wx),
+                "Any_significant": len(sig_dm) > 0 or len(sig_wx) > 0,
+            }
+        )
     return pd.DataFrame(rows)

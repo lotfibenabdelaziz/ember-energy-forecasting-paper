@@ -25,17 +25,17 @@ from torch.utils.data import DataLoader, Dataset, Subset
 COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
 TARGET = "Demand"
 
-TRAIN_END      = 2016
-VAL_END        = 2020
-TEST_END       = 2024
+TRAIN_END = 2016
+VAL_END = 2020
+TEST_END = 2024
 FORECAST_YEARS = list(range(2025, 2031))
-SEQ_LEN        = 5
-EPOCHS         = 300
-HORIZON        = 1
-PATIENCE       = 40
-BATCH_SIZE     = 16
-LR             = 1e-3
-SEED           = 42
+SEQ_LEN = 5
+EPOCHS = 300
+HORIZON = 1
+PATIENCE = 40
+BATCH_SIZE = 16
+LR = 1e-3
+SEED = 42
 
 
 PALETTE = {
