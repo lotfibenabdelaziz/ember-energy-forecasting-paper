@@ -112,16 +112,12 @@ include = ["src*", "api*"]
 
 
 
-[tool.ruff]
-target-version = "py310"
-line-length    = 100
-
-[tool.ruff.lint]
-select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
-ignore = ["E501", "B008", "N803", "N806"]
-
-[tool.ruff.format]
-quote-style = "double"
+# ruff config lives ONLY in ruff.toml — having a [tool.ruff] section here
+# too caused a silent config split: ruff picks ruff.toml over pyproject.toml
+# when both exist, so this section was diverging invisibly from the real
+# config (missing RUF001 for the em-dashes/arrows used throughout this
+# codebase's comments/log messages — passed locally via ruff.toml, failed
+# in CI whenever ruff.toml wasn't present in that checkout).
 
 # ── pytest ────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
@@ -133,16 +129,9 @@ log_cli_level   = "INFO"
 
 # ── coverage ──────────────────────────────────────────────────────────────────
 
-[tool.coverage.run]
-source  = ["src", "api"]
-omit    = [
-    "tests/*",
-    "outputs/*",
-    "notebooks/*",
-    "src/*",
-]
-
-[tool.coverage.report]
-show_missing = true
-fail_under   = 60
+# Config lives in .coveragerc (single source of truth — see note above
+# about ruff.toml vs [tool.ruff] for why we don't duplicate config here).
+# The old version of this section also had a self-contradiction: "src"
+# was listed in both `source` (measure it) and `omit` (exclude it),
+# which collapsed src/ coverage toward 0%.
 

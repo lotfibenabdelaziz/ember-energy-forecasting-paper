@@ -32,7 +32,7 @@ jobs:
       - name: Install ruff only
         run: |
           pip install --upgrade pip --retries 5 --timeout 60
-          pip install ruff --retries 5 --timeout 60
+          pip install "ruff==0.6.9" --retries 5 --timeout 60
 
       - name: ruff lint
         run: |
@@ -60,7 +60,7 @@ jobs:
         run: |
           pip install --upgrade pip --retries 5 --timeout 120
           pip install --retries 5 --timeout 120 \
-            pandas numpy scikit-learn xgboost statsmodels \
+            pandas numpy scipy scikit-learn xgboost statsmodels \
             matplotlib seaborn mlflow fastapi uvicorn \
             pydantic python-jose passlib python-dotenv \
             pyyaml httpx pytest pytest-cov pytest-timeout \
@@ -69,10 +69,12 @@ jobs:
       - name: Create .env
         run: |
           echo "CSV_PATH=data/raw/yearly_full_release_long_format.csv" >> .env
-          echo "OUTPUTS_DIR=outputs" >> .env
           echo "OUTPUT_ROOT=outputs" >> .env
-          echo "TRAIN_UNTIL=2016" >> .env
-          echo "FORECAST_UNTIL=2030" >> .env
+          echo "TRAIN_END=2016" >> .env
+          echo "VAL_END=2020" >> .env
+          echo "TEST_END=2024" >> .env
+          echo "FORECAST_START=2025" >> .env
+          echo "FORECAST_END=2030" >> .env
           echo "ADMIN_USERNAME=admin" >> .env
           echo "ADMIN_PASSWORD=ci-test-password" >> .env
           echo "SECRET_KEY=ci-test-secret-key-32-chars-minimum" >> .env
@@ -80,11 +82,14 @@ jobs:
 
       - name: Run unit tests (no DL, no API, no pipeline integration)
         run: |
-          pytest tests/test_preprocessing.py \
+          pytest tests/test_eda.py \
+                 tests/test_preprocessing.py \
                  tests/test_modeling.py \
                  tests/test_forecasting.py \
                  tests/test_mlflow_config.py \
                  tests/test_pipeline.py \
+                 tests/test_robustness.py \
+                 tests/test_significance.py \
             -v --tb=short \
             -p no:cacheprovider \
             --cov=src --cov=pipeline --cov=pipeline_cache \
