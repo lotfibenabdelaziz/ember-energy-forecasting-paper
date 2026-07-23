@@ -13,7 +13,7 @@ xgboost>=1.7.0
 statsmodels>=0.13.0
 
 # ── Deep Learning (PyTorch) ───────────────────────────────────────────────────
-torch>=2.0.0
+torch>=2.0.0,<2.6.0    # cap until verified against newer releases
 torchvision>=0.15.0        # utilities
 
 # ── Experiment Tracking ───────────────────────────────────────────────────────

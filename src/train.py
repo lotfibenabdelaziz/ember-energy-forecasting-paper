@@ -62,7 +62,7 @@ def train_model(
 
     model = model.to(device)
     opt = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(opt, patience=15, factor=0.5, verbose=False)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(opt, patience=15, factor=0.5)
     criterion = nn.MSELoss()
 
     best_val = float("inf")
