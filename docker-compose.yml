@@ -7,8 +7,12 @@ name: ember-energy
 x-common-env: &common-env
   OUTPUTS_DIR:          outputs
   MLFLOW_TRACKING_URI:  http://mlflow:5000
-  TRAIN_UNTIL:          ${TRAIN_UNTIL:-2019}
-  FORECAST_UNTIL:       ${FORECAST_UNTIL:-2025}
+  # NOTE: .env's actual keys are TRAIN_END/FORECAST_END (read by src/config.py) —
+  # bridging them here to TRAIN_UNTIL/FORECAST_UNTIL, which is what pipeline.py's
+  # --train_until/--forecast_until CLI flags expect. Defaults match the
+  # Dockerfile's own baked-in ENV (2016/2030) — do not let these drift again.
+  TRAIN_UNTIL:          ${TRAIN_END:-2016}
+  FORECAST_UNTIL:       ${FORECAST_END:-2030}
 
 services:
 
@@ -30,9 +34,9 @@ services:
       - --csv
       - /app/${CSV_PATH:-data/raw/yearly_full_release_long_format.csv}
       - --train_until
-      - "${TRAIN_UNTIL:-2019}"
+      - "${TRAIN_END:-2016}"
       - --forecast_until
-      - "${FORECAST_UNTIL:-2025}"
+      - "${FORECAST_END:-2030}"
     depends_on:
       mlflow:
         condition: service_healthy
@@ -48,15 +52,18 @@ services:
       - "${PORT:-8000}:8000"
     volumes:
       - ./outputs:/app/outputs:ro
+    env_file:
+      - .env
     environment:
       PORT:        "${PORT:-8000}"
       ENV:         "${ENV:-production}"
       OUTPUT_ROOT: outputs
     depends_on:
-      - pipeline
+      pipeline:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3

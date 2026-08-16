@@ -13,6 +13,9 @@ Stages: None → Staging → Production → Archived
 
 from __future__ import annotations
 
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
 import json
 import logging
 import os

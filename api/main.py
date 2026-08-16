@@ -84,6 +84,7 @@ DL_BEST_CSV = _ROOT / "deeplearning" / "dl_best_models.csv"
 HISTORY_CSV = _ROOT / "preprocessing" / "ember_model_ready.csv"
 SUBCATEGORY_CSV = _ROOT / "eda" / "ember_filtered.csv"
 SUMMARY_STATS_CSV = _ROOT / "eda" / "table01_eda_statistics.csv"
+MULTIFEATURE_CSV = _ROOT / "preprocessing" / "ember_multifeature.csv"
 
 FIGURES_DIRS = [
     _ROOT / "eda" / "figures",
@@ -132,6 +133,7 @@ def _load_all() -> dict[str, pd.DataFrame]:
         "history": _load(HISTORY_CSV, "history"),
         "subcategories": _load(SUBCATEGORY_CSV, "subcategories"),
         "summary_stats": _load(SUMMARY_STATS_CSV, "summary_stats"),
+        "multifeature": _load(MULTIFEATURE_CSV, "multifeature"),
     }
 
 
@@ -171,6 +173,14 @@ app.add_middleware(
 
 
 # ── Security headers ──────────────────────────────────────────────────────────
+# NOTE: /docs, /redoc, /openapi.json are FastAPI's own auto-generated debug
+# pages — their Swagger UI assets load from cdn.jsdelivr.net (a different
+# domain than the dashboard's own cdnjs.cloudflare.com/Google Fonts CSP
+# below), so they're deliberately excluded from this strict policy rather
+# than loosening the dashboard's real CSP to accommodate a debug-only page.
+_DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -178,16 +188,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com "
-            "https://fonts.googleapis.com; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com "
-            "https://fonts.gstatic.com; "
-            "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data:; "
-            "connect-src 'self';"
-        )
+        if request.url.path not in _DOCS_PATHS:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com "
+                "https://fonts.googleapis.com; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com "
+                "https://fonts.gstatic.com; "
+                "font-src 'self' https://fonts.gstatic.com; "
+                "img-src 'self' data:; "
+                "connect-src 'self';"
+            )
         if os.getenv("ENV") == "production":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
@@ -525,6 +536,58 @@ def get_summary_stats() -> dict:
     """Pre-computed 2000 vs 2024 summary statistics per country (EDA table01)."""
     df = _require(_DATA["summary_stats"], "Summary statistics")
     return {"rows": df.to_dict(orient="records")}
+
+
+# Crisis-period windows — widened slightly from the single-year markers used
+# elsewhere (2009/2020/2022) since a scatter needs multiple points per period
+# to show a trend shift, not just one isolated year.
+CRISIS_PERIODS = {
+    "2008 Financial Crisis": (2008, 2009),
+    "COVID-19 Pandemic":     (2020, 2021),
+    "Ukraine War / Energy Crisis": (2022, 2023),
+}
+
+
+def _tag_crisis_period(year: int) -> str:
+    for label, (start, end) in CRISIS_PERIODS.items():
+        if start <= year <= end:
+            return label
+    return "Normal"
+
+
+@app.get("/data/fuel-vs-demand/{country}", tags=["data"], dependencies=[Depends(get_current_user)])
+def get_fuel_vs_demand(country: str) -> dict:
+    """
+    Fuel vs Demand scatter data for one country, with each point tagged by
+    crisis period. Demand (TWh) and Fuel (GW) are on genuinely different
+    scales/units — the frontend plots them on independent X/Y axes rather
+    than a shared scale, and labels each axis with its actual unit.
+    """
+    country = _validate_country(country)
+    df = _require(_DATA["multifeature"], "Multifeature dataset")
+    sub = df[df["Area"] == country].sort_values("Year")
+    if sub.empty:
+        raise HTTPException(404, f"No multifeature data for {country}")
+
+    points = []
+    for _, row in sub.iterrows():
+        if pd.isna(row["Demand"]) or pd.isna(row["Fuel"]):
+            continue
+        year = int(row["Year"])
+        points.append({
+            "year": year,
+            "demand": round(float(row["Demand"]), 3),
+            "fuel": round(float(row["Fuel"]), 3),
+            "period": _tag_crisis_period(year),
+        })
+
+    return {
+        "country": country,
+        "demand_unit": "TWh",
+        "fuel_unit": "GW",
+        "periods": list(CRISIS_PERIODS.keys()) + ["Normal"],
+        "points": points,
+    }
 
 
 @app.get("/forecast/all/{country}", tags=["forecast"], dependencies=[Depends(get_current_user)])

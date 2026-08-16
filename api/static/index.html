@@ -791,6 +791,12 @@
         </svg>
         Data Overview
       </button>
+      <button class="nav-btn" onclick="showPage('fuelco2', this)">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/>
+        </svg>
+        Fuel &amp; CO2
+      </button>
       <button class="nav-btn active" onclick="showPage('overview', this)">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -918,6 +924,44 @@
               <tr><td colspan="7" class="state-msg">Loading…</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── FUEL & CO2 vs DEMAND PAGE ──────────────────────────── -->
+    <div id="page-fuelco2" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Fuel &amp; CO2 vs Demand</div>
+          <div class="page-meta">Dual-axis trends per country — how generation capacity and carbon intensity track demand over time</div>
+        </div>
+      </div>
+
+      <div class="explain-box">
+        <div class="explain-title">📖 How to read these charts</div>
+        Each panel shows one country's <b>Demand</b> (solid line, left axis, TWh) plotted
+        alongside <b>Fuel</b> or <b>CO2 intensity</b> (dashed line, right axis, its own unit)
+        over the same years. Because the two metrics use different axes, watching whether
+        the two lines <b>rise and fall together</b> — not their absolute values — is what
+        reveals the relationship. Vertical markers show the same three crisis periods used
+        elsewhere in this dashboard.
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">Fuel (Total Generation Capacity) vs. Demand — all countries</span>
+        </div>
+        <div class="two-col" id="fuelVsDemandGrid" style="grid-template-columns:1fr 1fr">
+          <!-- filled by JS: one dual-axis chart-card per country -->
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">CO2 Intensity vs. Demand — all countries</span>
+        </div>
+        <div class="two-col" id="co2VsDemandGrid" style="grid-template-columns:1fr 1fr">
+          <!-- filled by JS: one dual-axis chart-card per country -->
         </div>
       </div>
     </div>
@@ -1531,6 +1575,7 @@
   /* ── Page loader ─────────────────────────────────────────────── */
   function loadPage(name){
     if(name === 'data')      loadDataOverview();
+    if(name === 'fuelco2')   loadFuelCO2Page();
     if(name === 'overview')  loadOverview();
     if(name === 'forecast')  loadForecast();
     if(name === 'compare')   loadCompare();
@@ -1544,6 +1589,34 @@
   };
   let dataOverviewLoaded = false;
 
+  /* Event annotations — same 3 periods used throughout the dashboard.
+     Shared/top-level so both loadDataOverview() and loadFuelCO2Page() can
+     use it, not duplicated per-function. */
+  const EVENTS = [
+    { year: 2009, label: '2008 Financial crisis', color: '#6b7280' },
+    { year: 2020, label: 'COVID-19 pandemic',      color: '#e63946' },
+    { year: 2022, label: 'Ukraine-Russia war',      color: '#ff9f1c' },
+  ];
+  function buildEventAnnotations(years){
+    const ann = {};
+    EVENTS.forEach((ev, i) => {
+      const xIdx = years.indexOf(ev.year);
+      if (xIdx < 0) return;
+      ann['ev'+i] = {
+        type: 'line', scaleID: 'x', value: xIdx,
+        borderColor: ev.color, borderWidth: 1.5, borderDash: [4, 3],
+        label: {
+          display: true, content: ev.label,
+          font: { size: 9, family: "'DM Mono', monospace" },
+          color: ev.color, backgroundColor: 'rgba(10,12,16,.85)',
+          position: 'start', yAdjust: -6,
+          padding: { x: 6, y: 3 }, borderRadius: 4,
+        }
+      };
+    });
+    return ann;
+  }
+
   /* Renders a pill-style color key into any element, for the given
      list of countries — called once per chart so the key travels with
      each individual plot (useful when copying a single chart for slides). */
@@ -1554,6 +1627,108 @@
       <div class="country-key-item">
         <div class="country-key-dot" style="background:${COUNTRY_PALETTE[country] || '#94a3b8'}"></div>${country}
       </div>`).join('');
+  }
+
+  /* ── FUEL & CO2 vs DEMAND (dual-axis small multiples, all 7 countries) ── */
+  let fuelCO2Loaded = false;
+
+  function renderDualAxisGrid(gridElId, subcatData, metricKey, metricLabel, metricUnit, chartIdPrefix){
+    const gridEl = document.getElementById(gridElId);
+    gridEl.innerHTML = '';
+
+    const demandEntry = (subcatData.subcategories || {})['Demand'];
+    const metricEntry  = (subcatData.subcategories || {})[metricKey];
+    if (!demandEntry || !metricEntry) {
+      gridEl.innerHTML = '<div class="state-msg">Data not available</div>';
+      return;
+    }
+
+    COUNTRY_LIST.forEach((country, idx) => {
+      const demandSeries = demandEntry.countries[country];
+      const metricSeries  = metricEntry.countries[country];
+      if (!demandSeries || !metricSeries) return;
+
+      const canvasId = `${chartIdPrefix}_${idx}`;
+      const card = document.createElement('div');
+      card.className = 'section';
+      card.innerHTML = `
+        <div class="section-head">
+          <span class="section-title">${country}</span>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header" style="justify-content:space-between;margin-bottom:4px">
+            <div class="chart-legend" style="margin-bottom:0">
+              <div class="leg-item"><div class="leg-dot" style="background:${COUNTRY_PALETTE[country]}"></div>Demand (TWh)</div>
+              <div class="leg-item"><div class="leg-dot" style="background:${COUNTRY_PALETTE[country]}55;border:1.5px dashed ${COUNTRY_PALETTE[country]}"></div>${metricLabel} (${metricUnit})</div>
+            </div>
+            <button class="btn-copy" onclick="copyChart('${canvasId}', this)" title="Copy chart as image">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="${canvasId}" role="img" aria-label="${metricLabel} vs Demand — ${country}"></canvas>
+          </div>
+        </div>`;
+      gridEl.appendChild(card);
+
+      const years = demandSeries.years;
+      destroyChart(canvasId);
+      charts[canvasId] = new Chart(document.getElementById(canvasId), {
+        type: 'line',
+        data: {
+          labels: years,
+          datasets: [
+            {
+              label: 'Demand (TWh)',
+              data: demandSeries.demand_twh || demandSeries.values,
+              borderColor: COUNTRY_PALETTE[country],
+              backgroundColor: 'transparent',
+              borderWidth: 2.2, pointRadius: 0, tension: .3,
+              yAxisID: 'y',
+            },
+            {
+              label: `${metricLabel} (${metricUnit})`,
+              data: metricSeries.values,
+              borderColor: COUNTRY_PALETTE[country],
+              backgroundColor: 'transparent',
+              borderWidth: 1.6, borderDash: [5,3], pointRadius: 0, tension: .3,
+              yAxisID: 'y1',
+            },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            annotation: { annotations: buildEventAnnotations(years) },
+            tooltip: { mode: 'index', intersect: false },
+          },
+          scales: {
+            x: { grid: { color: 'rgba(255,255,255,.08)' } },
+            y:  { position: 'left',  title: { display: true, text: 'Demand (TWh)' },
+                  grid: { color: 'rgba(255,255,255,.08)' } },
+            y1: { position: 'right', title: { display: true, text: `${metricLabel} (${metricUnit})` },
+                  grid: { drawOnChartArea: false } },
+          },
+          interaction: { mode: 'nearest', axis: 'x', intersect: false },
+        },
+      });
+    });
+  }
+
+  const COUNTRY_LIST = ['Tunisia','Austria','Germany','Egypt','Canada','France','Kuwait'];
+
+  async function loadFuelCO2Page(){
+    if (fuelCO2Loaded) return;
+    try {
+      const subcatData = await apiFetch('/data/subcategories');
+      renderDualAxisGrid('fuelVsDemandGrid', subcatData, 'Total Generation Capacity', 'Fuel', 'GW', 'fuelChart');
+      renderDualAxisGrid('co2VsDemandGrid',  subcatData, 'CO2 intensity', 'CO2 Intensity', 'gCO2/kWh', 'co2Chart');
+      fuelCO2Loaded = true;
+    } catch(e) {
+      console.warn('Fuel/CO2 page unavailable:', e);
+    }
   }
 
   async function loadDataOverview(){
@@ -1584,32 +1759,6 @@
       }));
 
       renderCountryKey('dataDemandKey', countryNames);
-
-      /* Event annotations — same 3 periods used on the forecast charts */
-      const EVENTS = [
-        { year: 2009, label: '2008 Financial crisis', color: '#6b7280' },
-        { year: 2020, label: 'COVID-19 pandemic',      color: '#e63946' },
-        { year: 2022, label: 'Ukraine-Russia war',      color: '#ff9f1c' },
-      ];
-      function buildEventAnnotations(years){
-        const ann = {};
-        EVENTS.forEach((ev, i) => {
-          const xIdx = years.indexOf(ev.year);
-          if (xIdx < 0) return;
-          ann['ev'+i] = {
-            type: 'line', scaleID: 'x', value: xIdx,
-            borderColor: ev.color, borderWidth: 1.5, borderDash: [4, 3],
-            label: {
-              display: true, content: ev.label,
-              font: { size: 9, family: "'DM Mono', monospace" },
-              color: ev.color, backgroundColor: 'rgba(10,12,16,.85)',
-              position: 'start', yAdjust: -6,
-              padding: { x: 6, y: 3 }, borderRadius: 4,
-            }
-          };
-        });
-        return ann;
-      }
 
       destroyChart('dataDemand');
       charts['dataDemand'] = new Chart(document.getElementById('dataDemandChart'), {

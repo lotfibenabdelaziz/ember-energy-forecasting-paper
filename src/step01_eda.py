@@ -17,7 +17,6 @@ import warnings
 # ── Windows home/cache-dir fix — see src/config.py for full explanation ──────
 if os.name == "nt":
     import tempfile
-
     _fallback_dir = tempfile.gettempdir()
     os.environ.setdefault("USERPROFILE", _fallback_dir)
     os.environ.setdefault("LOCALAPPDATA", _fallback_dir)
@@ -120,6 +119,60 @@ def plot_demand_overlay(df_demand: pd.DataFrame, fig_dir: str) -> None:
     ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True, nbins=10))
     plt.tight_layout()
     savefig(fig, os.path.join(fig_dir, "eda_fig1_demand_overlay.pdf"))
+
+
+def plot_all_subcategories_grid(df_long: pd.DataFrame, fig_dir: str) -> None:
+    """
+    Unified 5-panel grid — Demand plus the four other retained
+    subcategories (CO2 intensity, Demand per capita, Electricity
+    imports, Fuel) — each panel overlaying all 7 countries, same visual
+    style/palette as the original standalone Demand overlay. Replaces
+    the previous split between a standalone Demand figure and a
+    separate 4-panel grid for the others, per paper figure consolidation.
+    """
+    # NOTE: df_long is RAW long-format data (straight from ember_filtered.csv),
+    # where Subcategory values use SPACES ("CO2 intensity"), not the
+    # underscored names ("CO2_intensity") used only after step02's pivot to
+    # wide format. Filtering with underscores here silently matches nothing
+    # for any multi-word subcategory, leaving those panels empty.
+    subcats = ["Demand", "CO2 intensity", "Demand per capita", "Electricity imports", "Fuel"]
+    titles = ["Demand", "CO2 Intensity", "Demand per Capita", "Electricity Imports", "Fuel"]
+
+    fig, axes = plt.subplots(2, 3, figsize=(18, 9))
+    axes = axes.flatten()
+
+    for i, (subcat, title) in enumerate(zip(subcats, titles)):
+        ax = axes[i]
+        sub_df = df_long[df_long["Subcategory"] == subcat]
+        if sub_df.empty:
+            ax.set_visible(False)
+            continue
+        unit = sub_df["Unit"].iloc[0] if "Unit" in sub_df.columns else ""
+
+        for c in COUNTRIES:
+            d = sub_df[sub_df["Area"] == c].sort_values("Year")
+            if d.empty:
+                continue
+            # Fuel carries multiple undifferentiated component rows per
+            # (Area, Year) in this dataset (no fuel-type column to split
+            # them) — summed as total generation capacity, matching the
+            # same logic already established for the dashboard's "Total
+            # Generation Capacity" series. The other subcategories
+            # (including Demand) are genuinely single-valued per year;
+            # mean is a safe no-op in those cases.
+            agg_fn = "sum" if subcat == "Fuel" else "mean"
+            d = d.groupby("Year", as_index=False)["Value"].agg(agg_fn)
+            ax.plot(d["Year"], d["Value"], color=PALETTE[c], lw=1.5, marker="o", ms=2.5, label=c)
+
+        ax.set_title(f"{title} — All Countries ({unit})", fontweight="bold", fontsize=10.5)
+        ax.set_xlabel("Year")
+        ax.set_ylabel(unit)
+        ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True, nbins=8))
+
+    axes[-1].set_visible(False)  # 6th grid slot unused (5 subcategories)
+    axes[0].legend(ncol=4, frameon=False, fontsize=7.5, loc="upper left", bbox_to_anchor=(0, 1.3))
+    plt.tight_layout()
+    savefig(fig, os.path.join(fig_dir, "eda_fig1_all_subcategories_grid.pdf"))
 
 
 def plot_demand_multiples(df_demand: pd.DataFrame, fig_dir: str) -> None:
@@ -306,7 +359,7 @@ def main() -> None:
     log.info("Saved → ember_filtered.csv")
 
     # Plots
-    plot_demand_overlay(df_demand, fig_dir)
+    plot_all_subcategories_grid(df_long, fig_dir)
     plot_demand_multiples(df_demand, fig_dir)
     plot_yoy(df_demand, fig_dir)
     plot_cagr_heatmap(df_demand, fig_dir)

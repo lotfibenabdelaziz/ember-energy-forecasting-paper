@@ -7,6 +7,7 @@
 SHELL       := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
+
 RM      = $(PYTHON) -c "import sys,shutil,os; [shutil.rmtree(p, ignore_errors=True) if os.path.isdir(p) else os.remove(p) for p in sys.argv[1:] if os.path.exists(p)]"
 MKDIR   = $(PYTHON) -c "import sys,os; os.makedirs(sys.argv[1], exist_ok=True)"
 DEVNULL := 2>/dev/null
@@ -516,31 +517,29 @@ print(f'{total/1e6:.1f} MB' if total else 'No local cache yet.')"
 # =============================================================================
 docker-build:
 	@echo "── [docker-build] Building pipeline image: $(IMAGE_NAME):$(IMAGE_TAG)…"
-	docker build -t $(FULL_IMAGE) -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	cmd.exe //c "docker build -t $(FULL_IMAGE) -t $(IMAGE_NAME):$(IMAGE_TAG) ."
 	@echo "✓  Pipeline image built."
 	@echo "── [docker-build] Building API image: ember-energy-api:$(IMAGE_TAG)…"
-	docker build -f Dockerfile.api -t $(REGISTRY)/ember-energy-api:$(IMAGE_TAG) -t ember-energy-api:$(IMAGE_TAG) .
+	cmd.exe //c "docker build -f Dockerfile.api -t $(REGISTRY)/ember-energy-api:$(IMAGE_TAG) -t ember-energy-api:$(IMAGE_TAG) ."
 	@echo "✓  API image built."
 	@echo "✓  Both images ready."
 
 docker-push: docker-build
 	@echo "── [docker-push] Pushing pipeline image to $(REGISTRY)…"
-	docker push $(FULL_IMAGE)
+	cmd.exe //c "docker push $(FULL_IMAGE)"
 	@echo "✓  Pipeline image pushed."
 	@echo "── [docker-push] Pushing API image to $(REGISTRY)…"
-	docker push $(REGISTRY)/ember-energy-api:$(IMAGE_TAG)
+	cmd.exe //c "docker push $(REGISTRY)/ember-energy-api:$(IMAGE_TAG)"
 	@echo "✓  API image pushed."
 	@echo "✓  Both images available at $(REGISTRY)"
 
 docker-run: $(CSV_PATH)
 	@echo "── [docker-run] Running pipeline inside Docker container…"
-	docker run --rm \
-	  -e MLFLOW_TRACKING_URI=http://host.docker.internal:$(MLFLOW_PORT) \
-	  -v $(PWD)/data:/app/data:ro \
-	  -v $(PWD)/outputs:/app/outputs \
-	  -v $(PWD)/mlruns:/app/mlruns \
-	  $(IMAGE_NAME):$(IMAGE_TAG) \
-	  --csv /app/$(CSV_PATH) --train_until $(TRAIN_UNTIL) --forecast_until $(FORECAST_UNTIL)
+	@# NOTE: $(PWD) here resolves via bash to a POSIX-style path (e.g. /c/Users/...).
+	@# cmd.exe/Docker Desktop usually translates this correctly for -v mounts, but
+	@# if you hit a "mount path not found" error (distinct from the exec bug this
+	@# wrapper fixes), switch $(PWD) to $(CURDIR) or an explicit Windows path.
+	cmd.exe //c "docker run --rm -e MLFLOW_TRACKING_URI=http://host.docker.internal:$(MLFLOW_PORT) -v $(PWD)/data:/app/data:ro -v $(PWD)/outputs:/app/outputs -v $(PWD)/mlruns:/app/mlruns $(IMAGE_NAME):$(IMAGE_TAG) --csv /app/$(CSV_PATH) --train_until $(TRAIN_UNTIL) --forecast_until $(FORECAST_UNTIL)"
 	@echo "✓  Pipeline container finished."
 
 # =============================================================================
@@ -548,27 +547,27 @@ docker-run: $(CSV_PATH)
 # =============================================================================
 compose-up:
 	@echo "── [compose-up] Starting API + MLflow services (detached)…"
-	docker compose up mlflow api --build -d
+	cmd.exe //c "docker compose up mlflow api --build -d"
 	@echo "✓  Services started."
 	@echo "   API    → http://localhost:$(PORT)/docs"
 	@echo "   MLflow → http://localhost:$(MLFLOW_PORT)"
 
 compose-pipeline: $(CSV_PATH)
 	@echo "── [compose-pipeline] Running pipeline via Docker Compose…"
-	docker compose run --rm pipeline
+	cmd.exe //c "docker compose run --rm pipeline"
 	@echo "✓  Pipeline container finished."
 
 compose-jupyter:
 	@echo "── [compose-jupyter] Starting Jupyter Lab → http://localhost:8888"
-	docker compose --profile dev up jupyter --build
+	cmd.exe //c "docker compose --profile dev up jupyter --build"
 
 compose-logs:
 	@echo "── [compose-logs] Streaming Docker Compose logs (Ctrl+C to stop)…"
-	docker compose logs --follow
+	cmd.exe //c "docker compose logs --follow"
 
 compose-down:
 	@echo "── [compose-down] Stopping all Compose services…"
-	docker compose down --remove-orphans
+	cmd.exe //c "docker compose down --remove-orphans"
 	@echo "✓  All services stopped."
 
 # =============================================================================
@@ -599,6 +598,13 @@ k8s-run-pipeline:
 	kubectl delete job ember-pipeline -n $(NAMESPACE) --ignore-not-found
 	kubectl apply -f k8s/job-pipeline.yaml
 	@echo "✓  Job submitted. Watch with: make k8s-logs"
+
+k8s-rebuild-api:
+	@echo "── [k8s-rebuild-api] Rebuilding API image and restarting deployment…"
+	cmd.exe //c "docker build -f Dockerfile.api -t ember-energy-api:latest ."
+	kubectl rollout restart deployment/ember-api -n $(NAMESPACE)
+	kubectl rollout status deployment/ember-api -n $(NAMESPACE)
+	@echo "✓  API rebuilt and restarted → http://localhost:30800/docs"
 
 k8s-status:
 	@echo "── [k8s-status] Kubernetes resource status (namespace: $(NAMESPACE)):"

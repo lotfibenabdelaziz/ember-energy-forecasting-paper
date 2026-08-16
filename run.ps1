@@ -16,8 +16,8 @@ param(
     [string]$Command = "help",
 
     [string]$Csv            = "data\ember_yearly_full_release_long_format.csv",
-    [int]   $TrainUntil     = 2016,
-    [int]   $ForecastUntil  = 2030,
+    [int]   $TrainEnd     = 2016,
+    [int]   $ForecastEnd  = 2030,
     [string]$Registry       = "ghcr.io/your-org",
     [string]$ImageTag       = "latest",
     [string]$Namespace      = "ember-pipeline",
