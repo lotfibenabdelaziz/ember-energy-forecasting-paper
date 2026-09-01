@@ -24,6 +24,9 @@ countries:
     - Total
     - Fuel
     - Electricity imports
+  drop_cols:
+    - Total
+    - Aggregate_fuel
 
 # ── Output paths ──────────────────────────────────────────────────────────────
 paths:

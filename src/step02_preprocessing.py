@@ -34,6 +34,9 @@ Notebook → Script mapping:
 
 from __future__ import annotations
 
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
 import argparse
 import json
 import logging
@@ -47,6 +50,8 @@ import pandas as pd
 import seaborn as sns
 from sklearn.ensemble import RandomForestRegressor
 
+from src.config import cfg
+
 warnings.filterwarnings("ignore")
 
 logging.basicConfig(
@@ -57,9 +62,12 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Cell 1: Constants ─────────────────────────────────────────────────────────
-COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwait"]
-TARGET = "Demand"
-DROP_COLS = ["Total", "Aggregate_fuel"]  # Cell 3 — dropped after pivot
+# Sourced from params.yaml (single source of truth — see src/config.py) rather
+# than hardcoded here a second time. This was previously an independent copy
+# that could silently drift from params.yaml / .env.
+COUNTRIES = cfg.countries
+TARGET = cfg.target
+DROP_COLS = cfg.drop_cols  # Cell 3 — dropped after pivot
 
 PALETTE = {
     "Tunisia": "#e63946",
@@ -123,16 +131,34 @@ def quality_report(df: pd.DataFrame, label: str = "") -> None:
 # ── Cell 2: Load filtered CSV ─────────────────────────────────────────────────
 
 
-def load_filtered(input_dir: str) -> pd.DataFrame:
-    """Mirrors notebook Cell 2 exactly."""
-    path = os.path.join(input_dir, "ember_filtered.csv")
-    df_all = pd.read_csv(path)
-    df_all.columns = df_all.columns.str.strip()
-    df = df_all[df_all["Area"].isin(COUNTRIES)][
-        ["Area", "Year", "Subcategory", "Unit", "Value"]
-    ].copy()
+def load_filtered(input_dir: str, source: str = "csv", db_path: str | None = None) -> pd.DataFrame:
+    """
+    Mirrors notebook Cell 2. Two sources produce the identical long-format
+    frame (Area, Year, Subcategory, Unit, Value):
+
+      source="csv"       (default) — outputs/eda/ember_filtered.csv, as before.
+      source="warehouse" — src/staging.py's star schema (see warehouse/schema.sql).
+                            Same rows, but backed by a queryable split_label
+                            per year rather than a bare CSV. Use this when you
+                            want the point-in-time guarantee enforced at the
+                            data layer, e.g. for an ad hoc leakage audit via
+                            `python src/staging.py query --split train`.
+    """
+    if source == "warehouse":
+        from src.staging import DEFAULT_DB_PATH, load_from_warehouse
+
+        df = load_from_warehouse(db_path or DEFAULT_DB_PATH, countries=COUNTRIES)
+    else:
+        path = os.path.join(input_dir, "ember_filtered.csv")
+        df_all = pd.read_csv(path)
+        df_all.columns = df_all.columns.str.strip()
+        df = df_all[df_all["Area"].isin(COUNTRIES)][
+            ["Area", "Year", "Subcategory", "Unit", "Value"]
+        ].copy()
+
     df["Year"] = df["Year"].astype(int)
     df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
+    log.info("Source       : %s", source)
     log.info("Shape        : %s", df.shape)
     log.info("Years        : %d – %d", df.Year.min(), df.Year.max())
     log.info("Countries    : %s", sorted(df.Area.unique()))
@@ -202,22 +228,67 @@ def plot_check1_corr(corr_raw: pd.Series, fig_dir: str) -> None:
 # ── Cell 7: Impute missing ────────────────────────────────────────────────────
 
 
-def impute_missing(df_wide: pd.DataFrame, all_subs: list[str]) -> pd.DataFrame:
-    """Mirrors notebook Cell 7 exactly."""
+def impute_missing(df_wide: pd.DataFrame, all_subs: list[str], train_until: int) -> pd.DataFrame:
+    """
+    Leakage-safe imputation, gated on `train_until`.
+
+    LEAKAGE FIX (was: interpolate(limit_direction="both") + full-series mean,
+    computed over 2000-2024 before any split existed — meaning test-period
+    values shaped the fill used inside the training window). Now:
+
+      • Train rows (Year <= train_until): interpolated / mean-filled using
+        ONLY the train-period sub-series for that country. Reference points
+        for these fills never come from val/test/forecast years.
+      • Val/test/forecast rows (Year > train_until): forward-filled using
+        only already-past values within that country's series (never a
+        future value), then any still-missing cells fall back to the
+        TRAIN-period mean for that (Area, col) — never a mean computed over
+        val/test data.
+
+    This mirrors the notebook's intent (fill gaps, don't drop rows) while
+    guaranteeing no value at or before `train_until` is ever influenced by
+    data from after `train_until`.
+    """
     all_years = list(range(df_wide["Year"].min(), df_wide["Year"].max() + 1))
     idx_full = pd.MultiIndex.from_product([COUNTRIES, all_years], names=["Area", "Year"])
     df_wide = df_wide.set_index(["Area", "Year"]).reindex(idx_full).reset_index()
     log.info("After reindex: %s | Gaps: %d", df_wide.shape, df_wide[all_subs].isnull().sum().sum())
 
-    # Pass 1: linear interpolation
-    for col in all_subs:
-        df_wide[col] = df_wide.groupby("Area")[col].transform(
-            lambda s: s.interpolate(method="linear", limit_direction="both")
-        )
+    is_train = df_wide["Year"] <= train_until
 
-    # Pass 2: country mean fallback
     for col in all_subs:
-        df_wide[col] = df_wide.groupby("Area")[col].transform(lambda s: s.fillna(s.mean()))
+        filled = pd.Series(index=df_wide.index, dtype="float64")
+
+        # ── Train segment: interpolate using ONLY train-period points ──────
+        for area, g in df_wide[is_train].groupby("Area"):
+            s = g.sort_values("Year")[col]
+            s_interp = s.interpolate(method="linear", limit_direction="both")
+            filled.loc[s_interp.index] = s_interp.values
+
+        # Train-period mean fallback (used both for any remaining train gaps
+        # AND as the fallback for val/test/forecast below — never computed
+        # over anything past train_until).
+        train_means = df_wide[is_train].groupby("Area")[col].mean()
+        for area in COUNTRIES:
+            area_train_mask = is_train & (df_wide["Area"] == area)
+            still_na = filled.isna() & area_train_mask
+            filled.loc[still_na] = train_means.get(area, float("nan"))
+
+        # ── Val/test/forecast segment: forward-fill from the past only,
+        #    then fall back to the TRAIN-period mean (never a future value) ──
+        for area, g in df_wide[~is_train].groupby("Area"):
+            g_sorted = g.sort_values("Year")
+            # Seed the ffill with the last known train-period value so the
+            # first post-train row can still be forward-filled causally.
+            train_tail = df_wide[is_train & (df_wide["Area"] == area)].sort_values("Year")[col]
+            seed = train_tail.iloc[-1] if len(train_tail) else float("nan")
+            s = pd.concat([pd.Series([seed]), g_sorted[col]], ignore_index=True)
+            s_ffill = s.ffill().iloc[1:]
+            s_ffill.index = g_sorted.index
+            s_ffill = s_ffill.fillna(train_means.get(area, float("nan")))
+            filled.loc[s_ffill.index] = s_ffill.values
+
+        df_wide[col] = filled.values
 
     log.info("Remaining nulls: %d", df_wide[all_subs].isnull().sum().sum())
     return df_wide
@@ -290,25 +361,42 @@ def plot_check3_coverage(df_wide: pd.DataFrame, fig_dir: str) -> None:
 # ── Cell 12: Winsorization ────────────────────────────────────────────────────
 
 
-def winsorise_group(group: pd.DataFrame, cols: list[str], factor: float = 2.5) -> pd.DataFrame:
-    """Mirrors notebook Cell 12 winsorise_group() exactly."""
-    g = group.copy()
-    for col in cols:
-        q1, q3 = g[col].quantile([0.25, 0.75])
-        iqr = q3 - q1
-        g[col] = g[col].clip(q1 - factor * iqr, q3 + factor * iqr)
-    return g
+def fit_winsor_bounds(
+    df_wide: pd.DataFrame, cols: list[str], train_until: int, factor: float = 2.5
+) -> dict[str, dict[str, tuple[float, float]]]:
+    """
+    Fit per-(Area, col) IQR clipping bounds using ONLY Year <= train_until.
+
+    LEAKAGE FIX (was: quantiles computed over the full 2000-2024 series per
+    country before any split existed, so extreme values in the test period
+    shaped the clipping bounds applied to training-period values). Bounds
+    are now fit exclusively on the train window and applied unchanged to
+    every split — the standard fit-on-train / apply-to-all discipline.
+    """
+    train_df = df_wide[df_wide["Year"] <= train_until]
+    bounds: dict[str, dict[str, tuple[float, float]]] = {}
+    for area, g in train_df.groupby("Area"):
+        bounds[area] = {}
+        for col in cols:
+            q1, q3 = g[col].quantile([0.25, 0.75])
+            iqr = q3 - q1
+            bounds[area][col] = (q1 - factor * iqr, q3 + factor * iqr)
+    return bounds
 
 
-def apply_winsorization(df_wide: pd.DataFrame, all_subs: list[str]) -> pd.DataFrame:
-    """Mirrors notebook Cell 12 exactly."""
-    df_clean = (
-        df_wide.groupby("Area", group_keys=False)
-        .apply(lambda g: winsorise_group(g, all_subs))
-        .reset_index(drop=True)
-    )
+def apply_winsorization(
+    df_wide: pd.DataFrame,
+    all_subs: list[str],
+    bounds: dict[str, dict[str, tuple[float, float]]],
+) -> pd.DataFrame:
+    """Apply train-fitted clipping bounds (see fit_winsor_bounds) to every row."""
+    df_clean = df_wide.copy()
+    for area, col_bounds in bounds.items():
+        mask = df_clean["Area"] == area
+        for col, (lo, hi) in col_bounds.items():
+            df_clean.loc[mask, col] = df_clean.loc[mask, col].clip(lo, hi)
     diff = (df_wide[all_subs] - df_clean[all_subs]).abs()
-    log.info("Cells clipped per feature:\n%s", (diff > 0).sum().to_string())
+    log.info("Cells clipped per feature (bounds fit on train only):\n%s", (diff > 0).sum().to_string())
     return df_clean
 
 
@@ -364,12 +452,20 @@ def plot_check4_corr(corr_clean: pd.Series, fig_dir: str) -> None:
 def engineer_features(
     df_clean: pd.DataFrame,
     all_subs: list[str],
-    corr_clean: pd.Series,
+    corr_for_selection: pd.Series,
 ) -> pd.DataFrame:
     """
-    Mirrors notebook Cells 16-17 exactly.
+    Mirrors notebook Cells 16-17.
     Cell 16: lags + MA + YoY + fix NaN/inf → fillna(0)
     Cell 17: cross-features + trend + country_code
+
+    `corr_for_selection` decides which 2 columns get a `demand_ratio_*`
+    feature (Cell 17). LEAKAGE FIX: this must be a train-only correlation
+    (see main()) — it used to be `corr_clean`, computed over the full
+    2000-2024 series, so which *feature exists at all* was decided partly
+    using test-period data. The lag/MA/YoY features themselves were always
+    leakage-safe (shift-based, causal within each country) — only this
+    top-2 selection needed gating.
     """
     df_feat = df_clean.sort_values(["Area", "Year"]).reset_index(drop=True)
 
@@ -415,8 +511,8 @@ def engineer_features(
             df_feat[f"share_{c}"] = df_feat[c] / (df_feat["total_generation"] + 1e-9)
         log.info("Generation share features: %s", gen_cols)
 
-    # Demand intensity vs top 2 correlated features
-    top2 = corr_clean.abs().nlargest(min(2, len(corr_clean))).index.tolist()
+    # Demand intensity vs top 2 correlated features (train-only selection)
+    top2 = corr_for_selection.abs().nlargest(min(2, len(corr_for_selection))).index.tolist()
     for feat in top2:
         df_feat[f"demand_ratio_{feat}"] = df_feat[TARGET] / (df_feat[feat] + 1e-9)
         log.info("Created: demand_ratio_%s", feat)
@@ -495,13 +591,25 @@ def plot_check5_pairplot(df_feat: pd.DataFrame, all_subs: list[str], fig_dir: st
 
 def compute_fi_cols(
     df_feat: pd.DataFrame,
+    train_until: int,
 ) -> tuple[list[str], pd.Series, RandomForestRegressor]:
     """
-    Mirrors notebook Cell 22 exactly.
-    Returns (fi_cols, corr_full, rf_model)
+    Feature-selection RF, fit strictly on the training window.
+
+    LEAKAGE FIX (was: fit on df_feat unfiltered — i.e. all years, including
+    the 2021-2024 test period — to decide which features become
+    `feature_meta.json["all_features"]`, the exact feature set step03/05
+    then train and evaluate on. That let test-period data influence which
+    features exist for the model, biasing reported test-period accuracy).
+    `corr_full` (used only for the descriptive Check-5 plots, never for a
+    modeling decision) is still computed over the full cleaned dataset —
+    that's a legitimate descriptive/EDA statistic, not a feature-selection
+    input, so it stays full-period on purpose.
     """
     num_cols = df_feat.select_dtypes(include=np.number).columns.tolist()
     num_cols = [c for c in num_cols if c not in ["Year", "country_code"]]
+
+    # Descriptive only (Check-5 plots) — intentionally full-period.
     corr_full = df_feat[num_cols].corr()[TARGET].drop(TARGET, errors="ignore").dropna()
     corr_full = corr_full.sort_values(key=abs, ascending=False)
 
@@ -511,18 +619,18 @@ def compute_fi_cols(
         if c != TARGET and not c.startswith(f"{TARGET}_lag") and not c.startswith(f"{TARGET}_ma")
     ]
 
-    # Explicitly replace inf/-inf with NaN BEFORE dropna
-    df_fi = df_feat[fi_cols + [TARGET]].replace([np.inf, -np.inf], np.nan).dropna()
+    # Feature-selection decision — train window ONLY.
+    df_train = df_feat[df_feat["Year"] <= train_until]
+    df_fi = df_train[fi_cols + [TARGET]].replace([np.inf, -np.inf], np.nan).dropna()
 
-    # Confirm no infs remain
     assert not np.isinf(df_fi.values).any(), "Still has inf values!"
-    log.info("RF training shape: %s", df_fi.shape)
+    log.info("RF feature-selection training shape (Year<=%d only): %s", train_until, df_fi.shape)
 
     rf = RandomForestRegressor(n_estimators=150, random_state=42, n_jobs=-1)
     rf.fit(df_fi[fi_cols], df_fi[TARGET])
 
     fi = pd.Series(rf.feature_importances_, index=fi_cols).sort_values(ascending=False)
-    log.info("Top 5 RF features:\n%s", fi.head(5).to_string())
+    log.info("Top 5 RF features (train-only fit):\n%s", fi.head(5).to_string())
 
     return fi_cols, corr_full, rf
 
@@ -558,9 +666,9 @@ def save_outputs(
         "COUNTRIES": COUNTRIES,
         "DROP_COLS": DROP_COLS,
         "TRAIN_END": train_until,
-        "VAL_END": 2020,
-        "TEST_END": 2024,
-        "FORECAST_YEARS": list(range(2025, 2031)),
+        "VAL_END": cfg.val_end,
+        "TEST_END": cfg.test_end,
+        "FORECAST_YEARS": cfg.forecast_years,
     }
 
     with open(os.path.join(output_dir, "feature_meta.json"), "w") as f:
@@ -579,7 +687,15 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Ember preprocessing step")
     p.add_argument("--input_dir", default="outputs/eda", help="EDA output dir")
     p.add_argument("--output_dir", default="outputs/preprocessing", help="Output dir")
-    p.add_argument("--train_until", type=int, default=2016, help="Last training year")
+    p.add_argument(
+        "--source", choices=["csv", "warehouse"], default="csv",
+        help="Read raw rows from the EDA CSV (default) or the star-schema warehouse",
+    )
+    p.add_argument("--db_path", default=None, help="Warehouse DB path (only used with --source warehouse)")
+    p.add_argument(
+        "--train_until", type=int, default=cfg.train_end,
+        help="Last training year — gates imputation/winsorization/feature-selection fits (leakage-safe)",
+    )
     return p.parse_args()
 
 
@@ -593,7 +709,7 @@ def main() -> None:
     os.makedirs(fig_dir, exist_ok=True)
 
     # Cell 2 — Load
-    df = load_filtered(args.input_dir)
+    df = load_filtered(args.input_dir, source=args.source, db_path=args.db_path)
 
     # Cell 3 — Pivot + rename + DROP_COLS
     df_wide, ALL_SUBS, FEATURES = pivot_wide(df)
@@ -606,8 +722,8 @@ def main() -> None:
     plot_check1_missing(df_wide, ALL_SUBS, fig_dir)
     plot_check1_corr(corr_raw, fig_dir)
 
-    # Cell 7 — Impute
-    df_wide = impute_missing(df_wide, ALL_SUBS)
+    # Cell 7 — Impute (leakage-safe: gated on args.train_until, see docstring)
+    df_wide = impute_missing(df_wide, ALL_SUBS, args.train_until)
 
     # Cell 8 — Quality: After Imputation
     quality_report(df_wide, "After Imputation")
@@ -622,20 +738,30 @@ def main() -> None:
     quality_report(df_wide, "After Dedup")
     plot_check3_coverage(df_wide, fig_dir)
 
-    # Cell 12 — Winsorize
+    # Cell 12 — Winsorize (bounds fit on train only, applied to all rows)
     df_wide_before = df_wide.copy()
-    df_clean = apply_winsorization(df_wide, ALL_SUBS)
+    winsor_bounds = fit_winsor_bounds(df_wide, ALL_SUBS, args.train_until)
+    df_clean = apply_winsorization(df_wide, ALL_SUBS, winsor_bounds)
 
     # Cell 13 — Quality: After Winsorization
     quality_report(df_clean, "After Winsorization")
 
-    # Cells 14-15 — Check 4 plots
+    # Cells 14-15 — Check 4 plots (descriptive, full-period — see note below)
     corr_clean = df_clean[ALL_SUBS].corr()[TARGET].drop(TARGET).sort_values(ascending=False)
     plot_check4_boxplots(df_wide_before, df_clean, ALL_SUBS, fig_dir)
     plot_check4_corr(corr_clean, fig_dir)
 
+    # Train-only correlation — used for the one FEATURE-SELECTION decision
+    # in Cell 17 (which columns get a demand_ratio_* feature). Kept separate
+    # from `corr_clean` above, which stays full-period because it only
+    # drives a descriptive plot, not a modeling decision.
+    df_clean_train = df_clean[df_clean["Year"] <= args.train_until]
+    corr_train = (
+        df_clean_train[ALL_SUBS].corr()[TARGET].drop(TARGET, errors="ignore").dropna()
+    )
+
     # Cells 16-17 — Feature engineering
-    df_feat = engineer_features(df_clean, ALL_SUBS, corr_clean)
+    df_feat = engineer_features(df_clean, ALL_SUBS, corr_train)
 
     # Cell 18 — Quality: FINAL
     quality_report(df_feat, "FINAL Feature Matrix")
@@ -651,8 +777,8 @@ def main() -> None:
     plot_check5_heatmap(df_feat, ALL_SUBS, fig_dir)
     plot_check5_pairplot(df_feat, ALL_SUBS, fig_dir)
 
-    # Cell 22 — RF importance → fi_cols
-    fi_cols, corr_full, _ = compute_fi_cols(df_feat)
+    # Cell 22 — RF importance → fi_cols (train-only fit, see docstring)
+    fi_cols, corr_full, _ = compute_fi_cols(df_feat, args.train_until)
 
     # Cell 23 — Drop rows with lag NaN + save
     lag_cols = [c for c in df_feat.columns if "_lag" in c]
@@ -666,13 +792,13 @@ def main() -> None:
         ax = axes[i]
         d = df_model[df_model["Area"] == c].sort_values("Year")
         tr = d[d["Year"] <= args.train_until]
-        va = d[(d["Year"] > args.train_until) & (d["Year"] <= 2020)]
-        te = d[d["Year"] > 2020]
+        va = d[(d["Year"] > args.train_until) & (d["Year"] <= cfg.val_end)]
+        te = d[d["Year"] > cfg.val_end]
         ax.plot(tr["Year"], tr[TARGET], color=zone_c["Train"], lw=2, label="Train")
         ax.plot(va["Year"], va[TARGET], color=zone_c["Val"], lw=2, label="Val")
         ax.plot(te["Year"], te[TARGET], color=zone_c["Test"], lw=2, label="Test")
         ax.axvline(args.train_until + 0.5, color="grey", ls="--", lw=1)
-        ax.axvline(2020 + 0.5, color="grey", ls=":", lw=1)
+        ax.axvline(cfg.val_end + 0.5, color="grey", ls=":", lw=1)
         ax.set_title(c, fontweight="bold")
         ax.set_ylabel("TWh")
         ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True, nbins=5))

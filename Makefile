@@ -28,8 +28,8 @@ NAMESPACE      ?= ember-pipeline
 MLFLOW_PORT    ?= 5000
 PORT           ?= 8000
 
-PYTHON ?= $(shell for p in python python3; do "$$p" --version >/dev/null 2>&1 && echo "$$p" && break; done)
-PIP    ?= $(PYTHON) -m pip
+PYTHON ?= uv run python
+UV     ?= uv
 
 # Fix: on Windows Git Bash, HOME isn't visible to Windows-native Python,
 # so matplotlib's Path.home() lookup fails. Give it a local, always-valid dir.
@@ -40,7 +40,7 @@ SET_MLFLOW  = MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT)
 SET_DEV_ENV = ENV=development OUTPUT_ROOT=outputs
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
-.PHONY: help install api-install lint lint-fix format format-check typecheck check \
+.PHONY: help install api-install staging-install lint lint-fix format format-check typecheck check \
         run run-eda run-preprocessing run-modeling run-forecasting run-deeplearning \
         rerun-eda rerun-preprocessing rerun-modeling rerun-forecasting rerun-deeplearning \
         test test-fast test-unit test-dl test-api test-pipeline test-parity \
@@ -59,6 +59,7 @@ SET_DEV_ENV = ENV=development OUTPUT_ROOT=outputs
         dvc-repro dvc-repro-eda dvc-repro-preprocessing dvc-repro-modeling \
         dvc-repro-forecasting dvc-repro-deeplearning \
         dvc-dag dvc-status dvc-params dvc-metrics dvc-plots dvc-gc dvc-cache-info \
+        staging-build staging-query staging-query-all staging-clean \
         clean clean-all
 
 .DEFAULT_GOAL := help
@@ -74,7 +75,8 @@ help:
 	@echo "  ╚══════════════════════════════════════════════════════╝"
 	@echo ""
 	@echo "  ── LOCAL PIPELINE ───────────────────────────────────────"
-	@echo "    make install                Install all dependencies"
+	@echo "    make install                Install deps (uv-managed .venv)"
+	@echo "    make staging-install        Add optional DuckDB staging backend"
 	@echo "    make run                    Full pipeline (smart cache)"
 	@echo "    make run-force              Full pipeline (ignore cache)"
 	@echo "    make run-eda                EDA step only"
@@ -128,6 +130,10 @@ help:
 	@echo "    make dvc-metrics            Show + diff metrics"
 	@echo "    make dvc-dag                Print pipeline DAG"
 	@echo ""
+	@echo "  ── DATA MODELING (staging) ──────────────────────────────"
+	@echo "    make staging-build          Build star-schema warehouse (SQLite)"
+	@echo "    make staging-query          Query the leak-safe train-split view"
+	@echo ""
 	@echo "  ── DOCKER ───────────────────────────────────────────────"
 	@echo "    make docker-build           Build pipeline + API images"
 	@echo "    make docker-push            Push images to ghcr.io"
@@ -155,17 +161,24 @@ help:
 # =============================================================================
 # INSTALL
 # =============================================================================
+# =============================================================================
+# INSTALL  (uv — fast resolver, manages .venv automatically)
+# =============================================================================
 install:
-	@echo "── [install] Upgrading pip…"
-	$(PIP) install --upgrade pip
-	@echo "── [install] Installing requirements.txt…"
-	$(PIP) install -r requirements.txt
-	@echo "✓  Dependencies installed."
+	@echo "── [install] Creating/syncing environment with uv…"
+	$(UV) venv --python 3.10 $(DEVNULL) || true
+	$(UV) pip install -r requirements.txt
+	@echo "✓  Dependencies installed via uv. Run targets automatically use 'uv run'."
 
 api-install:
-	@echo "── [api-install] Installing API + dev extras…"
-	$(PIP) install -e ".[api,langchain,dev]"
+	@echo "── [api-install] Installing API + dev extras via uv…"
+	$(UV) pip install -e ".[api,langchain,dev]"
 	@echo "✓  API dependencies installed."
+
+staging-install:
+	@echo "── [staging-install] Installing optional DuckDB backend for src/staging.py…"
+	$(UV) pip install -e ".[staging]"
+	@echo "✓  Staging (DuckDB) dependencies installed. SQLite backend needs nothing extra."
 
 # =============================================================================
 # PIPELINE — local runs
@@ -513,6 +526,27 @@ total=sum(os.path.getsize(os.path.join(r,f)) for r,_,fs in os.walk(p) for f in f
 print(f'{total/1e6:.1f} MB' if total else 'No local cache yet.')"
 
 # =============================================================================
+# DATA MODELING — star-schema staging warehouse (src/staging.py)
+# =============================================================================
+staging-build:
+	@echo "── [staging-build] Building star-schema warehouse from raw CSV…"
+	$(PYTHON) src/staging.py build --csv $(CSV_PATH) --db warehouse/ember.db
+	@echo "✓  warehouse/ember.db built. Inspect with: make staging-query"
+
+staging-query:
+	@echo "── [staging-query] Train-split rows (leak-safe view) for all countries:"
+	$(PYTHON) src/staging.py query --db warehouse/ember.db --split train
+
+staging-query-all:
+	@echo "── [staging-query-all] All rows (train+val+test+forecast years):"
+	$(PYTHON) src/staging.py query --db warehouse/ember.db
+
+staging-clean:
+	@echo "── [staging-clean] Removing warehouse/ember.db…"
+	$(RM) warehouse/ember.db warehouse/ember.duckdb
+	@echo "✓  Warehouse removed. Rebuild with: make staging-build"
+
+# =============================================================================
 # DOCKER
 # =============================================================================
 docker-build:
@@ -631,7 +665,7 @@ clean:
 	$(RM) outputs/
 	@echo "✓  outputs/ removed."
 
-clean-all: clean mlflow-clean
+clean-all: clean mlflow-clean staging-clean
 	@echo "── [clean-all] Removing Python cache files and temp directories…"
 	$(PYTHON) -c "import os,shutil; \
 [shutil.rmtree(os.path.join(r,d), ignore_errors=True) for r,ds,_ in os.walk('.') for d in list(ds) if d in ('__pycache__','.ipynb_checkpoints')]; \

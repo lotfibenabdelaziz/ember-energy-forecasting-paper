@@ -78,6 +78,21 @@ def savefig(fig, path: str) -> None:
     log.info("Saved → %s", path)
 
 
+def _boxplot_compat(ax, data, *, tick_labels=None, **kwargs):
+    """
+    matplotlib.Axes.boxplot()'s tick-label kwarg was renamed twice:
+    `labels` (< 3.9) -> `tick_labels` (>= 3.9, `labels` deprecated) ->
+    `labels` removed entirely (>= 3.11). pyproject.toml only pins
+    matplotlib>=3.6.0 with no upper bound, so depending on what a fresh
+    install resolves, either kwarg name can be the only one that works.
+    Try the current name first, fall back to the old one on TypeError.
+    """
+    try:
+        return ax.boxplot(data, tick_labels=tick_labels, **kwargs)
+    except TypeError:
+        return ax.boxplot(data, labels=tick_labels, **kwargs)
+
+
 # ── Load ──────────────────────────────────────────────────────────────────────
 def load_data(csv_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -253,9 +268,8 @@ def plot_distribution(df_demand: pd.DataFrame, fig_dir: str) -> None:
     fig, ax = plt.subplots(figsize=(11, 5))
     data = [df_demand[df_demand["Area"] == c]["Value"].dropna().values for c in COUNTRIES]
     colors = [PALETTE[c] for c in COUNTRIES]
-    bp = ax.boxplot(
-        data, patch_artist=True, labels=COUNTRIES, medianprops={"color": "black", "lw": 1.8}
-    )
+    bp = _boxplot_compat(ax, data, patch_artist=True, tick_labels=COUNTRIES,
+                          medianprops={"color": "black", "lw": 1.8})
     for patch, color in zip(bp["boxes"], colors, strict=False):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)

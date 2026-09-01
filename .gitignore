@@ -23,6 +23,8 @@ yearly_full_release_long_format.csv
 outputs/
 mlruns/
 .cache/
+warehouse/*.db
+warehouse/*.duckdb
 htmlcov/
 coverage.xml
 .coveragerc.bak
@@ -88,3 +90,12 @@ logs/
 .pytest_cache/
 .mypy_cache/"" 
 .mplconfig/" 
+
+.coverage
+coverage.xml
+mlflow.db
+.mplconfig/
+warehouse/
+data/engineering/df_engineering.csv
+data/processed/df_wide_processed.csv
+outputs_comparison/

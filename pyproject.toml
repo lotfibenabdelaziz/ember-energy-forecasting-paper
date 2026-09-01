@@ -1,6 +1,6 @@
 [build-system]
 requires      = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 # ── Project metadata ──────────────────────────────────────────────────────────
 [project]
@@ -38,10 +38,11 @@ dependencies = [
     "scikit-learn>=1.1.0",
     "xgboost>=1.7.0",
     "statsmodels>=0.13.0",
-    "tensorflow>=2.10.0",
     "torch>=2.0.0",
     "tqdm>=4.65.0",
     "dvc==3.67.1",
+    "mlflow>=3.15.1",
+    "python-jose[cryptography]>=3.5.0",
 ]
 
 # ── Optional dependency groups ────────────────────────────────────────────────
@@ -74,6 +75,12 @@ notebooks = [
     "ipykernel>=6.0.0",
 ]
 
+# Star-schema staging warehouse (src/staging.py). SQLite backend needs
+# nothing extra (stdlib); this only adds the optional DuckDB backend.
+staging = [
+    "duckdb>=0.10.0",
+]
+
 # Developer tools
 dev = [
     "flake8>=6.0.0",
@@ -97,7 +104,7 @@ dev = [
 
 # Full install (everything)
 all = [
-    "ember-energy-forecasting[api,langchain,notebooks,dev]",
+    "ember-energy-forecasting[api,langchain,notebooks,dev,staging]",
 ]
 
 # ── CLI entry points ──────────────────────────────────────────────────────────
