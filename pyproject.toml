@@ -134,6 +134,11 @@ filterwarnings  = ["ignore::DeprecationWarning"]
 log_cli         = true
 log_cli_level   = "INFO"
 
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]
+
 # ── coverage ──────────────────────────────────────────────────────────────────
 
 # Config lives in .coveragerc (single source of truth — see note above
