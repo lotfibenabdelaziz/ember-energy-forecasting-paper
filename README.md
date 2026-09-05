@@ -239,6 +239,21 @@ parameters (countries, train/val/test splits, model hyperparameters) —
 ports, API credentials) that legitimately differ per environment; it does
 not duplicate anything in `params.yaml`.
 
+> ⚠️ **Do not put `TRAIN_END`, `VAL_END`, `TEST_END`, `FORECAST_START`, or
+> `FORECAST_END` in `.env`.** These belong solely to `params.yaml`. If any
+> of them exist in `.env`, they **silently override** `params.yaml` (env
+> vars win by design — see `src/config.py`), which can quietly change your
+> train/test split boundary without touching `params.yaml` at all. This is
+> a real mistake that's happened on this project before: an old `.env`
+> template had `TRAIN_END=2024` sitting alongside `params.yaml`'s correct
+> `train_end: 2016`, and every local run silently used 2024 instead — no
+> error, just wrong results. Check with:
+> ```bash
+> python -c "from src.config import cfg; print(cfg.train_end, cfg.val_end, cfg.test_end)"
+> ```
+> This should print `2016 2020 2024` (or whatever `params.yaml` currently
+> says) — if it doesn't, grep your `.env` for those 5 variable names.
+
 ---
 
 ## API Endpoints
@@ -426,8 +441,11 @@ annual, few-hundred-row dataset; a star schema sized to the actual data is
 the right scope here.
 
 ```bash
+make staging-install   # optional: adds the DuckDB backend (SQLite works with no install)
 make staging-build     # builds warehouse/ember.db from data/raw/*.csv
-make staging-query     # prints the leak-safe train-split view
+make staging-query     # prints the leak-safe train-split view only
+make staging-query-all # prints all rows (train+val+test+forecast years)
+make staging-clean     # removes warehouse/ember.db (also runs as part of `make clean-all`)
 
 # Optional: source step02_preprocessing.py directly from the warehouse
 # instead of the CSV (same output either way):
@@ -502,7 +520,10 @@ make test-parity        # notebook vs script output parity
 make test-fast          # unit tests, stop on first failure
 ```
 
-**Coverage:** `src/` target ≥ 60% (`src/step05_deeplearning.py` excluded via `.coveragerc`)
+**Coverage:** target ≥ 60% for `src/` (`src/step05_deeplearning.py` excluded via
+`.coveragerc`) — run `make test-cov` for the current measured number; the
+figure drifts as tests are added, so this README states the target, not a
+frozen snapshot.
 
 Test files:
 
@@ -515,6 +536,8 @@ Test files:
 | `test_mlflow_config.py` | Param flattening · metric filtering · local MLflow |
 | `test_deeplearning.py` | Dataset · MLP · TCN · training loop · CLI |
 | `test_pipeline.py` | Step ordering · data contracts · reproducibility |
+| `test_pipeline_entrypoints.py` | step03/04/05 CLI entry points end-to-end (closes prior 0%-coverage gap on the scripts that produce reported results) |
+| `test_staging.py` | Star-schema warehouse build/query · train-split boundary enforcement |
 | `test_api.py` | All 12 endpoints · validation · error codes |
 | `test_parity.py` | Notebook vs script CSV output comparison |
 
@@ -532,6 +555,9 @@ torch>=2.0.0 (CPU build in Docker)
 
 # Experiment tracking
 mlflow>=2.12
+
+# Data modeling (staging warehouse)
+duckdb>=0.10.0  # optional — SQLite (stdlib) is the default backend, no install needed
 
 # API
 fastapi · uvicorn[standard] · pydantic
