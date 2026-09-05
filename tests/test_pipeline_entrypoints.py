@@ -20,6 +20,13 @@ covered by test_modeling.py / test_forecasting.py / test_deeplearning.py.
 step03/04 require statsmodels + xgboost; step05 requires torch — all three
 are skipped automatically (not failed) if the dependency is missing, same
 convention as test_deeplearning.py's existing torch skip.
+
+TIMEOUTS: calibrated against a real `make run` on the full dataset, which
+logged eda+preprocessing+modeling+forecasting = 275.2s combined (deep
+learning alone took 753.8s separately, timed via `make run`'s per-stage
+log). step03's synthetic-fixture timeout (600s) and step04's (300s) both
+carry roughly 2x headroom over that real-data baseline for slower CI
+machines — the original 180s was too tight and caused real timeouts.
 """
 
 from __future__ import annotations
@@ -68,7 +75,7 @@ class TestStep03ModelingEntrypoint:
                 "--input_dir", pre_dir,
                 "--output_dir", out_dir,
             ],
-            capture_output=True, text=True, timeout=180,
+            capture_output=True, text=True, timeout=600,
         )
         assert r.returncode == 0, r.stderr[-4000:]
         for fname in ["test_benchmarking.csv", "best_models.csv", "best_hp.json"]:
@@ -84,7 +91,7 @@ class TestStep04ForecastingEntrypoint:
         model_dir = str(tmp_path / "modeling_out")
         r_model = subprocess.run(
             [sys.executable, "src/step03_modeling.py", "--input_dir", pre_dir, "--output_dir", model_dir],
-            capture_output=True, text=True, timeout=180,
+            capture_output=True, text=True, timeout=600,
         )
         assert r_model.returncode == 0, r_model.stderr[-4000:]
 
@@ -97,7 +104,7 @@ class TestStep04ForecastingEntrypoint:
                 "--output_dir", out_dir,
                 "--forecast_until", "2030",
             ],
-            capture_output=True, text=True, timeout=180,
+            capture_output=True, text=True, timeout=300,
         )
         assert r.returncode == 0, r.stderr[-4000:]
         assert os.path.exists(os.path.join(out_dir, "demand_forecast_2025_2030.csv"))
