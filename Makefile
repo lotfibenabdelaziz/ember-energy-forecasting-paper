@@ -2,15 +2,43 @@
 # Makefile — Ember Energy Forecasting Pipeline
 # IEEE Paper | CI/CD + MLflow
 # Bash-only (Linux / macOS / WSL / Git Bash)
+# Works with either uv or conda — set ENV_MANAGER accordingly.
 # =============================================================================
 
 SHELL       := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
+# =============================================================================
+# ENVIRONMENT MANAGER SWITCH
+# =============================================================================
+# ENV_MANAGER = uv     -> uses a uv-managed .venv (default)
+# ENV_MANAGER = conda  -> uses a named conda environment (CONDA_ENV_NAME)
+#
+# Override on the command line, e.g.:
+#   make install ENV_MANAGER=conda
+#   make test    ENV_MANAGER=uv
+# =============================================================================
+ENV_MANAGER     ?= uv
+CONDA_ENV_NAME  ?= ember-energy-forecasting
+PYTHON_VERSION  ?= 3.10
+
+UV ?= uv
+
+ifeq ($(ENV_MANAGER),uv)
+  # RUN prefixes any tool invocation so it resolves inside the uv-managed venv,
+  # never whatever happens to be first on PATH (conda, system python, etc.)
+  RUN     := $(UV) run
+  PYTHON  := $(UV) run python
+else ifeq ($(ENV_MANAGER),conda)
+  # --no-capture-output keeps live output (progress bars, streaming logs) intact
+  RUN     := conda run -n $(CONDA_ENV_NAME) --no-capture-output
+  PYTHON  := conda run -n $(CONDA_ENV_NAME) --no-capture-output python
+else
+  $(error Unsupported ENV_MANAGER "$(ENV_MANAGER)" — must be "uv" or "conda")
+endif
 
 RM      = $(PYTHON) -c "import sys,shutil,os; [shutil.rmtree(p, ignore_errors=True) if os.path.isdir(p) else os.remove(p) for p in sys.argv[1:] if os.path.exists(p)]"
 MKDIR   = $(PYTHON) -c "import sys,os; os.makedirs(sys.argv[1], exist_ok=True)"
-DEVNULL := 2>/dev/null
 
 PYTEST_OPTS = -p no:cacheprovider
 
@@ -28,19 +56,17 @@ NAMESPACE      ?= ember-pipeline
 MLFLOW_PORT    ?= 5000
 PORT           ?= 8000
 
-PYTHON ?= uv run python
-UV     ?= uv
-
 # Fix: on Windows Git Bash, HOME isn't visible to Windows-native Python,
 # so matplotlib's Path.home() lookup fails. Give it a local, always-valid dir.
 export MPLCONFIGDIR := $(CURDIR)/.mplconfig
 
 # ── Environment helpers ───────────────────────────────────────────────────────
-SET_MLFLOW  = MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT)
+SET_MLFLOW  = MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT) MLFLOW_ALLOW_FILE_STORE=true
 SET_DEV_ENV = ENV=development OUTPUT_ROOT=outputs
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
-.PHONY: help install api-install staging-install lint lint-fix format format-check typecheck check \
+.PHONY: help env-info install install-uv install-conda api-install staging-install \
+        lint lint-fix format format-check typecheck check \
         run run-eda run-preprocessing run-modeling run-forecasting run-deeplearning \
         rerun-eda rerun-preprocessing rerun-modeling rerun-forecasting rerun-deeplearning \
         test test-fast test-unit test-dl test-api test-pipeline test-parity \
@@ -74,9 +100,14 @@ help:
 	@echo "  ║      IEEE Paper  |  CI/CD + MLflow                   ║"
 	@echo "  ╚══════════════════════════════════════════════════════╝"
 	@echo ""
-	@echo "  ── LOCAL PIPELINE ───────────────────────────────────────"
-	@echo "    make install                Install deps (uv-managed .venv)"
+	@echo "  Active ENV_MANAGER: $(ENV_MANAGER)  (override with ENV_MANAGER=uv|conda)"
+	@echo ""
+	@echo "  ── SETUP ────────────────────────────────────────────────"
+	@echo "    make env-info               Show which interpreter/env each command uses"
+	@echo "    make install                Install deps (uv .venv OR conda env, per ENV_MANAGER)"
 	@echo "    make staging-install        Add optional DuckDB staging backend"
+	@echo ""
+	@echo "  ── LOCAL PIPELINE ───────────────────────────────────────"
 	@echo "    make run                    Full pipeline (smart cache)"
 	@echo "    make run-force              Full pipeline (ignore cache)"
 	@echo "    make run-eda                EDA step only"
@@ -158,26 +189,51 @@ help:
 	@echo "    make clean-all              Remove outputs/ + mlruns/ + cache"
 	@echo ""
 
+# ── Diagnostics ───────────────────────────────────────────────────────────────
+env-info:
+	@echo "ENV_MANAGER   = $(ENV_MANAGER)"
+	@echo "PYTHON cmd    = $(PYTHON)"
+	@echo "RUN cmd       = $(RUN)"
+	@echo "Resolved python:"
+	$(PYTHON) -c "import sys; print(' ', sys.executable); print(' ', sys.version)"
+
 # =============================================================================
 # INSTALL
 # =============================================================================
-# =============================================================================
-# INSTALL  (uv — fast resolver, manages .venv automatically)
-# =============================================================================
 install:
-	@echo "── [install] Creating/syncing environment with uv…"
-	$(UV) venv --python 3.10 $(DEVNULL) || true
+ifeq ($(ENV_MANAGER),uv)
+	$(MAKE) install-uv
+else
+	$(MAKE) install-conda
+endif
+
+install-uv:
+	@echo "── [install-uv] Creating/syncing environment with uv…"
+	$(UV) python install $(PYTHON_VERSION)
+	$(UV) venv --python $(PYTHON_VERSION)
 	$(UV) pip install -r requirements.txt
-	@echo "✓  Dependencies installed via uv. Run targets automatically use 'uv run'."
+	@echo "✓  Dependencies installed via uv (.venv, Python $(PYTHON_VERSION))."
+
+install-conda:
+	@echo "── [install-conda] Creating/syncing conda environment '$(CONDA_ENV_NAME)'…"
+	@if conda env list | grep -qE "^$(CONDA_ENV_NAME)[[:space:]]"; then \
+		echo "   Environment exists — updating…"; \
+		conda run -n $(CONDA_ENV_NAME) --no-capture-output pip install -r requirements.txt; \
+	else \
+		echo "   Creating new environment…"; \
+		conda create -y -n $(CONDA_ENV_NAME) python=$(PYTHON_VERSION); \
+		conda run -n $(CONDA_ENV_NAME) --no-capture-output pip install -r requirements.txt; \
+	fi
+	@echo "✓  Dependencies installed via conda (env: $(CONDA_ENV_NAME))."
 
 api-install:
-	@echo "── [api-install] Installing API + dev extras via uv…"
-	$(UV) pip install -e ".[api,langchain,dev]"
+	@echo "── [api-install] Installing API + dev extras…"
+	$(RUN) pip install -e ".[api,langchain,dev]"
 	@echo "✓  API dependencies installed."
 
 staging-install:
 	@echo "── [staging-install] Installing optional DuckDB backend for src/staging.py…"
-	$(UV) pip install -e ".[staging]"
+	$(RUN) pip install -e ".[staging]"
 	@echo "✓  Staging (DuckDB) dependencies installed. SQLite backend needs nothing extra."
 
 # =============================================================================
@@ -185,19 +241,16 @@ staging-install:
 # =============================================================================
 all: run
 
-# ── Full pipeline (smart cache) ───────────────────────────────────────────────
 run: $(CSV_PATH)
 	@echo "── [run] Starting full pipeline (smart cache)…"
 	$(SET_MLFLOW) $(PYTHON) pipeline.py --csv $(CSV_PATH) --train_until $(TRAIN_UNTIL) --forecast_until $(FORECAST_UNTIL)
 	@echo "✓  Pipeline complete."
 
-# ── Full pipeline (cache disabled) ───────────────────────────────────────────
 run-force: $(CSV_PATH)
 	@echo "── [run-force] Starting full pipeline (cache disabled)…"
 	$(SET_MLFLOW) $(PYTHON) pipeline.py --csv $(CSV_PATH) --train_until $(TRAIN_UNTIL) --forecast_until $(FORECAST_UNTIL) --force
 	@echo "✓  Pipeline complete (forced)."
 
-# ── Individual steps (respect pipeline cache) ────────────────────────────────
 run-eda: $(CSV_PATH)
 	@echo "── [run-eda] Running EDA step…"
 	$(PYTHON) src/step01_eda.py --csv $(CSV_PATH) --output_dir outputs/eda
@@ -223,7 +276,6 @@ run-deeplearning:
 	$(PYTHON) src/step05_deeplearning.py --pre_dir outputs/preprocessing --output_dir outputs/deeplearning --quick
 	@echo "✓  Deep learning complete → outputs/deeplearning/"
 
-# ── Re-run steps (always executes, bypasses pipeline cache) ─────────────────
 rerun-eda:
 	@echo "── [rerun-eda] Re-running EDA (cache bypassed)…"
 	$(PYTHON) src/step01_eda.py --csv $(CSV_PATH) --output_dir outputs/eda
@@ -288,15 +340,15 @@ cache-invalidate-deeplearning:
 	@echo "✓  Deep learning cache invalidated."
 
 # =============================================================================
-# TESTS
+# TESTS — all invoked through $(RUN) so they resolve inside the correct env
 # =============================================================================
 COV_FLAGS = --cov=src --cov=api --cov=pipeline --cov=mlflow_config \
             --cov-report=term-missing --cov-report=html:htmlcov \
             --cov-report=xml:coverage.xml --cov-config=.coveragerc
 
 test:
-	@echo "── [test] Running full test suite with coverage…"
-	pytest tests/ $(PYTEST_OPTS) -v --tb=short $(COV_FLAGS)
+	@echo "── [test] Running full test suite with coverage ($(ENV_MANAGER))…"
+	$(RUN) pytest tests/ $(PYTEST_OPTS) -v --tb=short $(COV_FLAGS)
 	@echo "✓  Tests complete. HTML report → htmlcov/index.html"
 
 TEST_FAST_IGNORES = --ignore=tests/test_api.py --ignore=tests/test_pipeline.py \
@@ -304,7 +356,7 @@ TEST_FAST_IGNORES = --ignore=tests/test_api.py --ignore=tests/test_pipeline.py \
 
 test-fast:
 	@echo "── [test-fast] Running fast unit tests (stop on first failure)…"
-	pytest tests/ $(PYTEST_OPTS) -v --tb=short -x -q $(TEST_FAST_IGNORES)
+	$(RUN) pytest tests/ $(PYTEST_OPTS) -v --tb=short -x -q $(TEST_FAST_IGNORES)
 	@echo "✓  Fast tests complete."
 
 UNIT_TEST_FILES = tests/test_eda.py tests/test_preprocessing.py tests/test_modeling.py \
@@ -312,32 +364,32 @@ UNIT_TEST_FILES = tests/test_eda.py tests/test_preprocessing.py tests/test_model
 
 test-unit:
 	@echo "── [test-unit] Running unit tests…"
-	pytest $(UNIT_TEST_FILES) -v --tb=short
+	$(RUN) pytest $(UNIT_TEST_FILES) -v --tb=short
 	@echo "✓  Unit tests complete."
 
 test-dl:
 	@echo "── [test-dl] Running deep learning tests…"
-	pytest tests/test_deeplearning.py -v --tb=short
+	$(RUN) pytest tests/test_deeplearning.py -v --tb=short
 	@echo "✓  Deep learning tests complete."
 
 test-api:
 	@echo "── [test-api] Running FastAPI endpoint tests…"
-	pytest tests/test_api.py -v --tb=short
+	$(RUN) pytest tests/test_api.py -v --tb=short
 	@echo "✓  API tests complete."
 
 test-pipeline:
 	@echo "── [test-pipeline] Running integration tests…"
-	pytest tests/test_pipeline.py -v --tb=short
+	$(RUN) pytest tests/test_pipeline.py -v --tb=short
 	@echo "✓  Integration tests complete."
 
 test-parity:
 	@echo "── [test-parity] Running notebook vs script parity tests…"
-	pytest tests/test_parity.py -v --tb=short
+	$(RUN) pytest tests/test_parity.py -v --tb=short
 	@echo "✓  Parity tests complete."
 
 test-parity-full: run
 	@echo "── [test-parity-full] Full parity check (pipeline re-run + parity tests)…"
-	pytest tests/test_parity.py -v --tb=short
+	$(RUN) pytest tests/test_parity.py -v --tb=short
 	@echo "✓  Full parity check complete."
 
 COV_FLAGS_NOAPI = --ignore=tests/test_api.py --ignore=tests/test_pipeline.py \
@@ -346,37 +398,37 @@ COV_FLAGS_NOAPI = --ignore=tests/test_api.py --ignore=tests/test_pipeline.py \
 
 test-cov:
 	@echo "── [test-cov] Running coverage report (excluding API + pipeline tests)…"
-	pytest tests/ -q $(COV_FLAGS_NOAPI)
+	$(RUN) pytest tests/ -q $(COV_FLAGS_NOAPI)
 	@echo "✓  Coverage report → htmlcov/index.html"
 
 # =============================================================================
-# CODE QUALITY — powered by RUFF
+# CODE QUALITY — powered by RUFF (invoked through $(RUN))
 # =============================================================================
 RUFF_TARGETS = src/ api/ pipeline.py pipeline_cache.py mlflow_config.py
 
 lint:
 	@echo "── [lint] Running ruff check…"
-	ruff check $(RUFF_TARGETS)
+	$(RUN) ruff check $(RUFF_TARGETS)
 	@echo "✓  Lint passed."
 
 lint-fix:
 	@echo "── [lint-fix] Auto-fixing with ruff…"
-	ruff check --fix $(RUFF_TARGETS)
+	$(RUN) ruff check --fix $(RUFF_TARGETS)
 	@echo "── [lint-fix] Formatting with ruff format…"
-	ruff format $(RUFF_TARGETS)
+	$(RUN) ruff format $(RUFF_TARGETS)
 	@echo "✓  Code fixed and formatted."
 
 format: lint-fix
 
 format-check:
 	@echo "── [format-check] Checking format without changes…"
-	ruff format --check $(RUFF_TARGETS)
-	ruff check $(RUFF_TARGETS)
+	$(RUN) ruff format --check $(RUFF_TARGETS)
+	$(RUN) ruff check $(RUFF_TARGETS)
 	@echo "✓  Format check passed."
 
 typecheck:
 	@echo "── [typecheck] Running mypy…"
-	mypy src/ api/ mlflow_config.py --config-file mypy.ini
+	$(RUN) mypy src/ api/ mlflow_config.py --config-file mypy.ini
 	@echo "✓  Type check passed."
 
 check: lint typecheck test-fast
@@ -388,19 +440,19 @@ check: lint typecheck test-fast
 api-run:
 	@echo "── [api-run] Starting FastAPI development server…"
 	@echo "   Docs → http://localhost:$(PORT)/docs"
-	$(SET_DEV_ENV) uvicorn api.main:app --reload --host 0.0.0.0 --port $(PORT)
+	$(SET_DEV_ENV) $(RUN) uvicorn api.main:app --reload --host 0.0.0.0 --port $(PORT)
 
 # =============================================================================
-# MLFLOW
+# MLFLOW (invoked through $(RUN))
 # =============================================================================
 mlflow-ui:
 	@echo "── [mlflow-ui] Starting MLflow tracking server…"
 	@echo "   UI → http://127.0.0.1:$(MLFLOW_PORT)"
-	mlflow server --host 0.0.0.0 --port $(MLFLOW_PORT) --backend-store-uri ./mlruns --default-artifact-root ./mlruns/artifacts
+	MLFLOW_ALLOW_FILE_STORE=true $(RUN) mlflow server --host 0.0.0.0 --port $(MLFLOW_PORT) --backend-store-uri ./mlruns --default-artifact-root ./mlruns/artifacts
 
 mlflow-list:
 	@echo "── [mlflow-list] Listing runs in experiment 'ember-demand-forecasting'…"
-	mlflow runs list --experiment-name ember-demand-forecasting
+	$(RUN) mlflow runs list --experiment-name ember-demand-forecasting
 	@echo "✓  Run list complete."
 
 mlflow-register:
@@ -428,94 +480,88 @@ mlflow-clean:
 	@echo "✓  mlruns/ removed."
 
 # =============================================================================
-# DVC — Data Version Control
+# DVC — Data Version Control (invoked through $(RUN))
 # =============================================================================
-
-# ── Setup ─────────────────────────────────────────────────────────────────────
 dvc-init:
 	@echo "── [dvc-init] Initialising DVC in repository…"
-	dvc init
-	dvc config core.autostage true
-	dvc config core.analytics false
+	$(RUN) dvc init
+	$(RUN) dvc config core.autostage true
+	$(RUN) dvc config core.analytics false
 	@echo "✓  DVC initialised. Next: make dvc-remote-add"
 
 dvc-remote-add:
 	@echo "── [dvc-remote-add] Edit .dvc/config and uncomment your preferred remote, then run:"
 	@echo "     dvc remote default <name>"
 
-# ── Data ──────────────────────────────────────────────────────────────────────
 dvc-add-data:
 	@echo "── [dvc-add-data] Tracking raw CSV with DVC…"
-	dvc add data/raw/yearly_full_release_long_format.csv
+	$(RUN) dvc add data/raw/yearly_full_release_long_format.csv
 	@echo "✓  Data file tracked. Commit the generated .dvc pointer file."
 
 dvc-pull:
 	@echo "── [dvc-pull] Pulling data and outputs from DVC remote…"
-	dvc pull
+	$(RUN) dvc pull
 	@echo "✓  Pull complete."
 
 dvc-push:
 	@echo "── [dvc-push] Pushing data and outputs to DVC remote…"
-	dvc push
+	$(RUN) dvc push
 	@echo "✓  Push complete."
 
-# ── Pipeline ──────────────────────────────────────────────────────────────────
 dvc-repro:
 	@echo "── [dvc-repro] Reproducing full DVC pipeline…"
-	dvc repro
+	$(RUN) dvc repro
 	@echo "✓  Pipeline reproduced. Run 'make dvc-push' to cache outputs."
 
 dvc-repro-eda:
 	@echo "── [dvc-repro-eda] Reproducing EDA stage…"
-	dvc repro eda
+	$(RUN) dvc repro eda
 	@echo "✓  EDA stage reproduced."
 
 dvc-repro-preprocessing:
 	@echo "── [dvc-repro-preprocessing] Reproducing preprocessing stage…"
-	dvc repro preprocessing
+	$(RUN) dvc repro preprocessing
 	@echo "✓  Preprocessing stage reproduced."
 
 dvc-repro-modeling:
 	@echo "── [dvc-repro-modeling] Reproducing modeling stage…"
-	dvc repro modeling
+	$(RUN) dvc repro modeling
 	@echo "✓  Modeling stage reproduced."
 
 dvc-repro-forecasting:
 	@echo "── [dvc-repro-forecasting] Reproducing forecasting stage…"
-	dvc repro forecasting
+	$(RUN) dvc repro forecasting
 	@echo "✓  Forecasting stage reproduced."
 
 dvc-repro-deeplearning:
 	@echo "── [dvc-repro-deeplearning] Reproducing deep learning stage…"
-	dvc repro deeplearning
+	$(RUN) dvc repro deeplearning
 	@echo "✓  Deep learning stage reproduced."
 
-# ── Inspection ────────────────────────────────────────────────────────────────
 dvc-dag:
 	@echo "── [dvc-dag] Printing pipeline DAG…"
-	dvc dag
+	$(RUN) dvc dag
 
 dvc-status:
 	@echo "── [dvc-status] DVC pipeline status…"
-	dvc status
+	$(RUN) dvc status
 
 dvc-params:
 	@echo "── [dvc-params] Showing parameter diff…"
-	dvc params diff
+	$(RUN) dvc params diff
 
 dvc-metrics:
 	@echo "── [dvc-metrics] Showing metrics…"
-	dvc metrics show
-	dvc metrics diff
+	$(RUN) dvc metrics show
+	$(RUN) dvc metrics diff
 
 dvc-plots:
 	@echo "── [dvc-plots] Generating DVC plots…"
-	dvc plots show
+	$(RUN) dvc plots show
 
-# ── Cache ─────────────────────────────────────────────────────────────────────
 dvc-gc:
 	@echo "── [dvc-gc] Removing unused DVC cache entries…"
-	dvc gc --workspace --force
+	$(RUN) dvc gc --workspace --force
 	@echo "✓  Garbage collection complete."
 
 dvc-cache-info:
