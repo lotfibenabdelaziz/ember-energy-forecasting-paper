@@ -125,25 +125,3 @@ def damped_holt_strong_1step(ts: pd.Series) -> float:
         return float(m.forecast(1).iloc[0])
     except Exception:
         return float(ts.iloc[-1])
-
-
-def sarima_1step(ts: pd.Series) -> float:
-    """
-    SARIMA(1,1,1)(1,0,1,1) — seasonal ARIMA.
-    Kuwait's demand is cooling-load driven (Gulf-state AC demand) — a
-    seasonal AR component fits that physical pattern better than pure trend.
-    Falls back to ARIMA(1,1,1) if seasonal fit fails.
-    """
-    try:
-        from statsmodels.tsa.statespace.sarimax import SARIMAX
-
-        m = SARIMAX(
-            ts.values,
-            order=(1, 1, 1),
-            seasonal_order=(1, 0, 1, 1),
-            enforce_stationarity=False,
-            enforce_invertibility=False,
-        ).fit(disp=False, maxiter=200)
-        return float(m.forecast(1).iloc[0])
-    except Exception:
-        return arima_1step(ts)

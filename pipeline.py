@@ -27,10 +27,10 @@ import sys
 import time
 
 from dotenv import load_dotenv
-load_dotenv()
-from pipeline_cache import StepCache, StepDefinition
-from src.config import cfg as project_cfg
 
+load_dotenv()
+from pipeline_cache import StepCache, StepDefinition  # noqa: E402 — must follow load_dotenv()
+from src.config import cfg as project_cfg  # noqa: E402 — must follow load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,

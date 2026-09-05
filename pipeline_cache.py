@@ -7,6 +7,8 @@ Formatting     : RUFF-compliant (ruff check + ruff format)
 How it works:
     Before running a step, hash:
       - The script file
+      - All Python source files in each declared code directory
+        (catches changes in IMPORTED modules, not just the entry script)
       - All declared input files / directories
       - The relevant params from params.yaml
 
@@ -19,15 +21,17 @@ Usage:
 
     cache = StepCache()
     step  = StepDefinition(
-        name    = "eda",
-        script  = "src/01_eda.py",
-        deps    = ["data/raw/ember.csv"],
-        params  = ["data", "countries"],
-        outputs = ["outputs/eda/ember_filtered.csv"],
+        name      = "modeling",
+        script    = "src/step03_modeling.py",
+        code_dirs = ["src/modeling/"],   # catches walk_forward.py,
+                                          # forecasters.py, features.py etc.
+        deps      = ["outputs/preprocessing/ember_model_ready.csv"],
+        params    = ["data", "countries"],
+        outputs   = ["outputs/modeling/wf_test_predictions.csv"],
     )
 
     if cache.is_cached(step):
-        log.info("Skipping eda — inputs unchanged")
+        log.info("Skipping modeling — inputs unchanged")
     else:
         run_step(...)
         cache.mark_done(step)
@@ -61,15 +65,24 @@ class StepDefinition:
 
     Attributes
     ----------
-    name    : Unique step identifier (e.g. "eda", "modeling")
-    script  : Path to the .py script file
-    deps    : Input files/dirs that affect the cache hash
-    params  : Top-level keys from params.yaml that affect the hash
-    outputs : Files that must exist for cache to be considered valid
+    name      : Unique step identifier (e.g. "eda", "modeling")
+    script    : Path to the entry-point .py script file
+    code_dirs : Source directories containing modules THIS SCRIPT IMPORTS.
+                Every .py file inside is hashed — a change to any imported
+                module (e.g. src/modeling/walk_forward.py) correctly
+                invalidates the cache, not just edits to `script` itself.
+                THIS IS THE FIX: previously only `script` was hashed,
+                so changes buried in imported modules were silently
+                invisible to the cache, requiring a full `make clean`
+                to force a rerun even for a real, significant code change.
+    deps      : Input files/dirs that affect the cache hash (data, not code)
+    params    : Top-level keys from params.yaml that affect the hash
+    outputs   : Files that must exist for cache to be considered valid
     """
 
     name: str
     script: str
+    code_dirs: list[str] = field(default_factory=list)
     deps: list[str] = field(default_factory=list)
     params: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
@@ -98,10 +111,10 @@ def _hash_file(path: Path, chunk_size: int = 1 << 20) -> str:
     return h.hexdigest()
 
 
-def _hash_dir(path: Path) -> str:
-    """SHA-256 over all files in a directory (sorted for determinism)."""
+def _hash_dir(path: Path, pattern: str = "*") -> str:
+    """SHA-256 over all matching files in a directory (sorted for determinism)."""
     h = hashlib.sha256()
-    for fp in sorted(path.rglob("*")):
+    for fp in sorted(path.rglob(pattern)):
         if fp.is_file():
             h.update(fp.name.encode())
             h.update(_hash_file(fp).encode())
@@ -116,6 +129,19 @@ def _hash_path(p: str | Path) -> str:
     return _hash_dir(path) if path.is_dir() else _hash_file(path)
 
 
+def _hash_code_dir(p: str | Path) -> str:
+    """
+    Hash every .py file in a source directory, recursively.
+    Used for `code_dirs` — deliberately restricted to *.py so that
+    unrelated files sitting alongside source code (e.g. stray __pycache__
+    artifacts, notebooks) don't spuriously invalidate the cache.
+    """
+    path = Path(p)
+    if not path.exists():
+        return "missing"
+    return _hash_dir(path, pattern="*.py")
+
+
 def _hash_params(keys: list[str]) -> str:
     """Hash specific top-level keys from params.yaml."""
     if not PARAMS_FILE.exists():
@@ -128,18 +154,21 @@ def _hash_params(keys: list[str]) -> str:
 
 
 def _hash_script(script: str) -> str:
-    """Hash the script file so code changes invalidate the cache."""
+    """Hash the entry-point script file so direct edits invalidate the cache."""
     path = Path(script)
     return _hash_file(path) if path.exists() else "no-script"
 
 
 def _compute_fingerprint(step: StepDefinition) -> str:
     """
-    Combine hashes of script + deps + params into one fingerprint.
-    Any change to any input produces a different fingerprint.
+    Combine hashes of script + code_dirs + deps + params into one fingerprint.
+    Any change to any input — including a change buried in an imported
+    module, not just the entry script — produces a different fingerprint.
     """
     h = hashlib.sha256()
     h.update(_hash_script(step.script).encode())
+    for code_dir in sorted(step.code_dirs):
+        h.update(f"{code_dir}:{_hash_code_dir(code_dir)}".encode())
     for dep in sorted(step.deps):
         h.update(f"{dep}:{_hash_path(dep)}".encode())
     h.update(_hash_params(step.params).encode())

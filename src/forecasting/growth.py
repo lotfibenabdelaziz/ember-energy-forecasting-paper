@@ -55,36 +55,45 @@ def compute_growth_summary(
 
         fc_2025 = fc_2025_row["Forecast"].values[0]
         fc_2030 = fc_2030_row["Forecast"].values[0]
-        lo_2030 = fc_2030_row["Lower_90"].values[0] if "Lower_90" in fc_2030_row.columns else fc_2030
-        hi_2030 = fc_2030_row["Upper_90"].values[0] if "Upper_90" in fc_2030_row.columns else fc_2030
+        lo_2030 = (
+            fc_2030_row["Lower_90"].values[0] if "Lower_90" in fc_2030_row.columns else fc_2030
+        )
+        hi_2030 = (
+            fc_2030_row["Upper_90"].values[0] if "Upper_90" in fc_2030_row.columns else fc_2030
+        )
 
-        cagr    = ((fc_2030 / hist_last) ** (1 / 6) - 1) * 100 if hist_last > 0 else float("nan")
+        cagr = ((fc_2030 / hist_last) ** (1 / 6) - 1) * 100 if hist_last > 0 else float("nan")
         total_g = (fc_2030 - hist_last) / hist_last * 100 if hist_last > 0 else float("nan")
 
-        best_row  = best_df[best_df["Country"] == country]
+        best_row = best_df[best_df["Country"] == country]
         test_mape = best_row["MAPE"].values[0] if not best_row.empty else float("nan")
 
         quality = (
-            "Excellent" if test_mape < 3 else
-            "Good"      if test_mape < 7 else
-            "Moderate"  if test_mape < 15 else
-            "Poor"
+            "Excellent"
+            if test_mape < 3
+            else "Good"
+            if test_mape < 7
+            else "Moderate"
+            if test_mape < 15
+            else "Poor"
         )
         model = fc_2030_row["Model"].values[0] if "Model" in fc_2030_row.columns else "unknown"
 
-        rows.append({
-            "Country":          country,
-            "2024 (TWh)":       round(hist_last, 1),
-            "2025 Forecast":    round(fc_2025, 1),
-            "2030 Forecast":    round(fc_2030, 1),
-            "2030 90% Lo":      round(lo_2030, 1),
-            "2030 90% Hi":      round(hi_2030, 1),
-            "Total Growth %":   round(total_g, 1),
-            "CAGR 24-30 %":     round(cagr, 2),
-            "Test MAPE %":      round(test_mape, 2),
-            "Forecast Quality": quality,
-            "Model":            model,
-        })
+        rows.append(
+            {
+                "Country": country,
+                "2024 (TWh)": round(hist_last, 1),
+                "2025 Forecast": round(fc_2025, 1),
+                "2030 Forecast": round(fc_2030, 1),
+                "2030 90% Lo": round(lo_2030, 1),
+                "2030 90% Hi": round(hi_2030, 1),
+                "Total Growth %": round(total_g, 1),
+                "CAGR 24-30 %": round(cagr, 2),
+                "Test MAPE %": round(test_mape, 2),
+                "Forecast Quality": quality,
+                "Model": model,
+            }
+        )
 
     result = pd.DataFrame(rows)
     if result.empty:

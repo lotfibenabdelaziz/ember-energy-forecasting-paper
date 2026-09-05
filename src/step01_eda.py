@@ -17,6 +17,7 @@ import warnings
 # ── Windows home/cache-dir fix — see src/config.py for full explanation ──────
 if os.name == "nt":
     import tempfile
+
     _fallback_dir = tempfile.gettempdir()
     os.environ.setdefault("USERPROFILE", _fallback_dir)
     os.environ.setdefault("LOCALAPPDATA", _fallback_dir)
@@ -156,7 +157,7 @@ def plot_all_subcategories_grid(df_long: pd.DataFrame, fig_dir: str) -> None:
     fig, axes = plt.subplots(2, 3, figsize=(18, 9))
     axes = axes.flatten()
 
-    for i, (subcat, title) in enumerate(zip(subcats, titles)):
+    for i, (subcat, title) in enumerate(zip(subcats, titles, strict=True)):
         ax = axes[i]
         sub_df = df_long[df_long["Subcategory"] == subcat]
         if sub_df.empty:
@@ -268,8 +269,13 @@ def plot_distribution(df_demand: pd.DataFrame, fig_dir: str) -> None:
     fig, ax = plt.subplots(figsize=(11, 5))
     data = [df_demand[df_demand["Area"] == c]["Value"].dropna().values for c in COUNTRIES]
     colors = [PALETTE[c] for c in COUNTRIES]
-    bp = _boxplot_compat(ax, data, patch_artist=True, tick_labels=COUNTRIES,
-                          medianprops={"color": "black", "lw": 1.8})
+    bp = _boxplot_compat(
+        ax,
+        data,
+        patch_artist=True,
+        tick_labels=COUNTRIES,
+        medianprops={"color": "black", "lw": 1.8},
+    )
     for patch, color in zip(bp["boxes"], colors, strict=False):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)

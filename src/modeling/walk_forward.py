@@ -23,7 +23,6 @@ from src.modeling.forecasters import (
     linear_trend_1step,
     ml_1step,
     naive_1step,
-    sarima_1step,
     theta_1step,
 )
 
@@ -52,7 +51,7 @@ def walk_forward_evaluate(
     For each (country, year):
       1. Train on all data strictly before `year`
       2. Predict `year` with 11 models: Naive, LinearTrend, Holt, DampedHolt,
-         Theta, ARIMA(1,1,1), SARIMA, Ridge, ElasticNet, BayesianRidge,
+         Theta, ARIMA(1,1,1), ML Ridge, ElasticNet, BayesianRidge,
          RandomForest, XGBoost
       3. Record actual vs predicted
 
@@ -85,7 +84,6 @@ def walk_forward_evaluate(
             preds["Holt"] = holt_1step(train_series)
             preds["DampedHolt"] = damped_holt_strong_1step(train_series)
             preds["ARIMA_1_1_1"] = arima_1step(train_series)
-            preds["SARIMA"] = sarima_1step(train_series)
             preds["Theta"] = theta_1step(train_series)
 
             try:

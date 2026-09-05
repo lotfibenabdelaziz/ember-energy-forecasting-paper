@@ -25,7 +25,9 @@ Writes:  outputs/modeling/test_benchmarking.csv
 
 from __future__ import annotations
 
-import sys as _sys, os as _os
+import os as _os
+import sys as _sys
+
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
 
@@ -39,8 +41,12 @@ import pandas as pd
 
 from src.modeling.metrics import agg_metrics
 from src.modeling.plots import (
-    plot_mape_heatmaps, plot_residuals, plot_skill_score,
-    plot_split_viz, plot_val_vs_test, plot_walk_forward_test,
+    plot_mape_heatmaps,
+    plot_residuals,
+    plot_skill_score,
+    plot_split_viz,
+    plot_val_vs_test,
+    plot_walk_forward_test,
 )
 from src.modeling.tune import tune_hyperparameters
 from src.modeling.walk_forward import walk_forward_evaluate
@@ -59,16 +65,16 @@ TARGET = "Demand"
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Ember modeling/benchmarking step")
-    p.add_argument("--input_dir",  default="outputs/preprocessing", help="Preprocessing output dir")
-    p.add_argument("--output_dir", default="outputs/modeling",      help="Output dir")
+    p.add_argument("--input_dir", default="outputs/preprocessing", help="Preprocessing output dir")
+    p.add_argument("--output_dir", default="outputs/modeling", help="Output dir")
     return p.parse_args()
 
 
 def main() -> None:
-    args    = parse_args()
+    args = parse_args()
     fig_dir = os.path.join(args.output_dir, "figures")
     os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(fig_dir,         exist_ok=True)
+    os.makedirs(fig_dir, exist_ok=True)
 
     # Load
     df = pd.read_csv(os.path.join(args.input_dir, "ember_model_ready.csv"))
@@ -77,12 +83,18 @@ def main() -> None:
 
     all_features = meta["all_features"]
     train_end = meta.get("TRAIN_END", 2016)
-    val_end   = meta.get("VAL_END", 2020)
-    test_end  = meta.get("TEST_END", 2024)
+    val_end = meta.get("VAL_END", 2020)
+    test_end = meta.get("TEST_END", 2024)
 
     log.info("Dataset shape: %s | Features: %d", df.shape, len(all_features))
-    log.info("Split: Train≤%d | Val %d-%d | Test %d-%d",
-             train_end, train_end + 1, val_end, val_end + 1, test_end)
+    log.info(
+        "Split: Train≤%d | Val %d-%d | Test %d-%d",
+        train_end,
+        train_end + 1,
+        val_end,
+        val_end + 1,
+        test_end,
+    )
 
     # 1. Split visualization
     plot_split_viz(df, TARGET, train_end, val_end, fig_dir)
@@ -106,22 +118,23 @@ def main() -> None:
     val_years = list(range(train_end + 1, val_end + 1))
     if val_years:
         log.info("── Walk-forward VAL evaluation: years %s", val_years)
-        val_res     = walk_forward_evaluate(df, good_features, TARGET, val_years, best_hp)
+        val_res = walk_forward_evaluate(df, good_features, TARGET, val_years, best_hp)
         val_metrics = agg_metrics(val_res)
         log.info("Val walk-forward results: %s", val_res.shape)
     else:
         log.warning(
             "Val years empty (train_end=%d >= val_end=%d) — skipping val evaluation",
-            train_end, val_end,
+            train_end,
+            val_end,
         )
-        val_res     = pd.DataFrame(columns=["Country", "Model", "y_actual", "y_pred"])
+        val_res = pd.DataFrame(columns=["Country", "Model", "y_actual", "y_pred"])
         val_metrics = pd.DataFrame(columns=["Country", "Model", "MAE", "RMSE", "MAPE"])
 
     # 5. Aggregate metrics
     test_metrics = agg_metrics(res)
-    best_test = test_metrics.loc[
-        test_metrics.groupby("Country")["MAPE"].idxmin()
-    ].reset_index(drop=True)
+    best_test = test_metrics.loc[test_metrics.groupby("Country")["MAPE"].idxmin()].reset_index(
+        drop=True
+    )
     log.info("Best model per country (Test MAPE):\n%s", best_test.to_string())
 
     # Plots
@@ -134,9 +147,9 @@ def main() -> None:
 
     # 6. Save
     test_metrics.to_csv(os.path.join(args.output_dir, "test_benchmarking.csv"), index=False)
-    val_metrics.to_csv(os.path.join(args.output_dir, "val_benchmarking.csv"),   index=False)
-    best_test.to_csv(os.path.join(args.output_dir, "best_models.csv"),          index=False)
-    res.to_csv(os.path.join(args.output_dir, "wf_test_predictions.csv"),        index=False)
+    val_metrics.to_csv(os.path.join(args.output_dir, "val_benchmarking.csv"), index=False)
+    best_test.to_csv(os.path.join(args.output_dir, "best_models.csv"), index=False)
+    res.to_csv(os.path.join(args.output_dir, "wf_test_predictions.csv"), index=False)
 
     # ── Statistical significance of MAPE differences ──────────────────────────
     # DM test + Wilcoxon signed-rank on every model pair per country, using
@@ -147,7 +160,9 @@ def main() -> None:
     if not sig_results.empty:
         sig_summary_df = significance_summary(sig_results)
         sig_results.to_csv(os.path.join(args.output_dir, "significance_tests.csv"), index=False)
-        sig_summary_df.to_csv(os.path.join(args.output_dir, "significance_summary.csv"), index=False)
+        sig_summary_df.to_csv(
+            os.path.join(args.output_dir, "significance_summary.csv"), index=False
+        )
         log.info("Significance tests: %d model pairs tested across all countries", len(sig_results))
     else:
         log.warning("run_significance_tests returned no rows — skipping significance export")

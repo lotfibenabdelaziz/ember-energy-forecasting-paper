@@ -18,7 +18,6 @@ STAT_MODELS = {
     "DampedHolt",
     "ARIMA(1,1,1)",
     "ARIMA_1_1_1",
-    "SARIMA",
     "Theta",
 }
 

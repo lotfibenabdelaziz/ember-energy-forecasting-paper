@@ -52,21 +52,6 @@ def forecast_statistical(series: np.ndarray, model_name: str, horizon: int) -> n
         pm = m.get_forecast(steps=horizon).predicted_mean
         # statsmodels >= 0.14 returns ndarray directly; older returns Series
         return np.array(pm)
-    elif model_name == "SARIMA":
-        try:
-            from statsmodels.tsa.statespace.sarimax import SARIMAX
-
-            m = SARIMAX(
-                series,
-                order=(1, 1, 1),
-                seasonal_order=(1, 0, 1, 1),
-                enforce_stationarity=False,
-                enforce_invertibility=False,
-            ).fit(disp=False, maxiter=200)
-            return np.array(m.forecast(horizon))
-        except Exception:
-            m = ARIMA(series, order=(1, 1, 1)).fit()
-            return np.array(m.get_forecast(steps=horizon).predicted_mean)
     elif model_name == "Theta":
         try:
             from statsmodels.tsa.forecasting.theta import ThetaModel

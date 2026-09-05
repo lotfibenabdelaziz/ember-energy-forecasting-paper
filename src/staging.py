@@ -34,18 +34,20 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import logging
-import os
-import sqlite3
+import os as _os
 from pathlib import Path
+import sqlite3
+import sys as _sys
 
 import pandas as pd
 
-import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
 from src.config import cfg
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S"
+)
 log = logging.getLogger(__name__)
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "warehouse" / "schema.sql"
@@ -117,9 +119,7 @@ def build_star_schema(
     conn.executescript(schema_sql) if hasattr(conn, "executescript") else conn.execute(schema_sql)
 
     # ── Dimensions ────────────────────────────────────────────────────────
-    dim_country = pd.DataFrame(
-        {"country_key": range(len(countries)), "area_name": countries}
-    )
+    dim_country = pd.DataFrame({"country_key": range(len(countries)), "area_name": countries})
     years = sorted(raw["Year"].unique().tolist())
     dim_year = pd.DataFrame(
         {
@@ -143,8 +143,10 @@ def build_star_schema(
     dim_subcategory.to_sql("dim_subcategory", conn, if_exists="append", index=False)
 
     # ── Fact ──────────────────────────────────────────────────────────────
-    country_map = dict(zip(dim_country["area_name"], dim_country["country_key"]))
-    subcat_map = dict(zip(dim_subcategory["subcategory_name"], dim_subcategory["subcategory_key"]))
+    country_map = dict(zip(dim_country["area_name"], dim_country["country_key"], strict=True))
+    subcat_map = dict(
+        zip(dim_subcategory["subcategory_name"], dim_subcategory["subcategory_key"], strict=True)
+    )
 
     fact = pd.DataFrame(
         {
@@ -161,7 +163,9 @@ def build_star_schema(
     # them here so the fact table's primary key holds, same aggregation the
     # existing pivot_wide() already performs downstream.
     fact = fact.groupby(["country_key", "year_key", "subcategory_key"], as_index=False).agg(
-        value=("value", "mean"), load_date=("load_date", "first"), source_file=("source_file", "first")
+        value=("value", "mean"),
+        load_date=("load_date", "first"),
+        source_file=("source_file", "first"),
     )
     fact.to_sql("fact_energy_measurement", conn, if_exists="append", index=False)
 
@@ -170,7 +174,11 @@ def build_star_schema(
 
     log.info(
         "Star schema built → %s (%d countries × %d years × %d subcategories, %d fact rows)",
-        db_path, len(countries), len(years), len(subcats), len(fact),
+        db_path,
+        len(countries),
+        len(years),
+        len(subcats),
+        len(fact),
     )
     return db_path
 
@@ -230,7 +238,9 @@ def _cli() -> None:
         build_star_schema(args.csv, args.db, backend=args.backend)
     elif args.cmd == "query":
         countries = [args.country] if args.country else None
-        df = load_from_warehouse(args.db, countries=countries, split=args.split, backend=args.backend)
+        df = load_from_warehouse(
+            args.db, countries=countries, split=args.split, backend=args.backend
+        )
         log.info("Query returned %s", df.shape)
         print(df.head(20).to_string())
 

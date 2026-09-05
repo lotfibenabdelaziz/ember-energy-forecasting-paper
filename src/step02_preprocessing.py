@@ -34,7 +34,9 @@ Notebook → Script mapping:
 
 from __future__ import annotations
 
-import sys as _sys, os as _os
+import os as _os
+import sys as _sys
+
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
 import argparse
@@ -260,7 +262,7 @@ def impute_missing(df_wide: pd.DataFrame, all_subs: list[str], train_until: int)
         filled = pd.Series(index=df_wide.index, dtype="float64")
 
         # ── Train segment: interpolate using ONLY train-period points ──────
-        for area, g in df_wide[is_train].groupby("Area"):
+        for _area, g in df_wide[is_train].groupby("Area"):
             s = g.sort_values("Year")[col]
             s_interp = s.interpolate(method="linear", limit_direction="both")
             filled.loc[s_interp.index] = s_interp.values
@@ -396,7 +398,9 @@ def apply_winsorization(
         for col, (lo, hi) in col_bounds.items():
             df_clean.loc[mask, col] = df_clean.loc[mask, col].clip(lo, hi)
     diff = (df_wide[all_subs] - df_clean[all_subs]).abs()
-    log.info("Cells clipped per feature (bounds fit on train only):\n%s", (diff > 0).sum().to_string())
+    log.info(
+        "Cells clipped per feature (bounds fit on train only):\n%s", (diff > 0).sum().to_string()
+    )
     return df_clean
 
 
@@ -688,12 +692,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--input_dir", default="outputs/eda", help="EDA output dir")
     p.add_argument("--output_dir", default="outputs/preprocessing", help="Output dir")
     p.add_argument(
-        "--source", choices=["csv", "warehouse"], default="csv",
+        "--source",
+        choices=["csv", "warehouse"],
+        default="csv",
         help="Read raw rows from the EDA CSV (default) or the star-schema warehouse",
     )
-    p.add_argument("--db_path", default=None, help="Warehouse DB path (only used with --source warehouse)")
     p.add_argument(
-        "--train_until", type=int, default=cfg.train_end,
+        "--db_path", default=None, help="Warehouse DB path (only used with --source warehouse)"
+    )
+    p.add_argument(
+        "--train_until",
+        type=int,
+        default=cfg.train_end,
         help="Last training year — gates imputation/winsorization/feature-selection fits (leakage-safe)",
     )
     return p.parse_args()
@@ -756,9 +766,7 @@ def main() -> None:
     # from `corr_clean` above, which stays full-period because it only
     # drives a descriptive plot, not a modeling decision.
     df_clean_train = df_clean[df_clean["Year"] <= args.train_until]
-    corr_train = (
-        df_clean_train[ALL_SUBS].corr()[TARGET].drop(TARGET, errors="ignore").dropna()
-    )
+    corr_train = df_clean_train[ALL_SUBS].corr()[TARGET].drop(TARGET, errors="ignore").dropna()
 
     # Cells 16-17 — Feature engineering
     df_feat = engineer_features(df_clean, ALL_SUBS, corr_train)
