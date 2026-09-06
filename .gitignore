@@ -7,12 +7,12 @@
 k8s/secret.yaml
 
 # ── Data (large files — tracked by DVC) ──────────────────────────────────────
-data/raw/*.csv
-data/raw/*.parquet
-data/raw/*.feather
+data/raw/**/*.csv
+data/raw/**/*.parquet
+data/raw/**/*.feather
 data/processed/
 data/engineering/
-data/externel/
+data/external/
 yearly_full_release_long_format.csv
 
 # Keep DVC pointer files
@@ -90,12 +90,3 @@ logs/
 .pytest_cache/
 .mypy_cache/"" 
 .mplconfig/" 
-
-.coverage
-coverage.xml
-mlflow.db
-.mplconfig/
-warehouse/
-data/engineering/df_engineering.csv
-data/processed/df_wide_processed.csv
-outputs_comparison/

@@ -160,7 +160,6 @@ yearly_full_release_long_format.csv   (Ember, 2000-2024)
 [step04_forecasting.py] ─────────────────────────────────────────────────────────
    demand_forecast_2025_2030.csv   point forecast + 90% Bootstrap CI
    demand_growth_summary.csv       CAGR per country (2024 → 2030)
-   forecast_metrics.csv            MAE · RMSE · MAPE · SMAPE · R² · TheilU
    outputs/forecasting/figures/
 ```
 
@@ -179,6 +178,22 @@ yearly_full_release_long_format.csv   (Ember, 2000-2024)
 > `--train_until` flag which defaults to `2016`. The pipeline splits are
 > hardcoded in `params.yaml` and `conftest.py` as `train_end=2016`,
 > `val_end=2020`, `test_end=2024`.
+>
+> ⚠️ `make run` (default) uses `TRAIN_UNTIL=2016` — this is the only mode
+> whose `test_benchmarking.csv`/`best_models.csv` numbers are valid
+> generalization estimates, since 2017–2024 stays genuinely unseen.
+> `step04_forecasting.py` already refits the winning model on the full
+> 2000–2024 history before forecasting 2025–2030 regardless of
+> `train_until` — `ember_model_ready.csv` always contains every year;
+> `train_until` only controls which years' imputation/winsorization/
+> feature-selection *statistics* get fitted during preprocessing.
+> `make run-production-forecast` fits those statistics on the full range
+> too (a real but second-order data-quality refinement, not a leakage
+> fix) — but its own evaluation metrics must never be reported as
+> accuracy, since it has no held-out test set. This was previously a
+> real bug: the Makefile's `TRAIN_UNTIL` defaulted to `2024` even for
+> `make run`, which silently disabled the leakage-safe train/test gating
+> in `step02_preprocessing.py` for anyone using the documented default.
 
 ---
 
@@ -198,10 +213,17 @@ yearly_full_release_long_format.csv   (Ember, 2000-2024)
 |--------|-------------|------|
 | MAE | Mean Absolute Error | TWh |
 | RMSE | Root Mean Squared Error | TWh |
-| R² | Coefficient of Determination | — |
 | MAPE | Mean Absolute Percentage Error | % |
-| SMAPE | Symmetric MAPE | % |
-| Theil-U | < 1 beats naive forecast | — |
+
+Model selection per country uses **Test MAPE** (`idxmin()` — see
+`src/step03_modeling.py`). Pairwise model comparisons additionally run
+**Diebold-Mariano**, **Wilcoxon signed-rank**, and **paired t-test**
+significance tests (`src/modeling/significance.py`) — not point metrics,
+but part of the evaluation.
+
+Deep learning (`src/evaluate.py`, `src/train.py`) additionally reports
+**SMAPE** alongside MAE/RMSE/MAPE — this is DL-specific, not part of the
+classical modeling metric set above.
 
 ---
 

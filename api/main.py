@@ -543,7 +543,7 @@ def get_summary_stats() -> dict:
 # to show a trend shift, not just one isolated year.
 CRISIS_PERIODS = {
     "2008 Financial Crisis": (2008, 2009),
-    "COVID-19 Pandemic": (2020, 2021),
+    "COVID-19 Pandemic":     (2020, 2021),
     "Ukraine War / Energy Crisis": (2022, 2023),
 }
 
@@ -574,14 +574,12 @@ def get_fuel_vs_demand(country: str) -> dict:
         if pd.isna(row["Demand"]) or pd.isna(row["Fuel"]):
             continue
         year = int(row["Year"])
-        points.append(
-            {
-                "year": year,
-                "demand": round(float(row["Demand"]), 3),
-                "fuel": round(float(row["Fuel"]), 3),
-                "period": _tag_crisis_period(year),
-            }
-        )
+        points.append({
+            "year": year,
+            "demand": round(float(row["Demand"]), 3),
+            "fuel": round(float(row["Fuel"]), 3),
+            "period": _tag_crisis_period(year),
+        })
 
     return {
         "country": country,
@@ -619,7 +617,7 @@ def get_all_models_forecast(country: str) -> dict:
 
 @app.get("/metrics/{country}", tags=["metrics"], dependencies=[Depends(get_current_user)])
 def get_metrics(country: str) -> dict:
-    """Classical model test-set metrics (MAE, RMSE, MAPE, SMAPE, R², TheilU)."""
+    """Classical model test-set metrics (MAE, RMSE, MAPE — see test_benchmarking.csv)."""
     country = _validate_country(country)
     df = _require(_DATA["metrics"], "Metrics")
 
