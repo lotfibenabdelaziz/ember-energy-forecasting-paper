@@ -38,6 +38,7 @@ import os as _os
 from pathlib import Path
 import sqlite3
 import sys as _sys
+from typing import Any
 
 import pandas as pd
 
@@ -61,7 +62,7 @@ except ImportError:
     HAS_DUCKDB = False
 
 
-def _connect(db_path: str | Path, backend: str = "auto"):
+def _connect(db_path: str | Path, backend: str = "auto") -> Any:
     """Return a DB-API-compatible connection. `backend`: 'sqlite' | 'duckdb' | 'auto'."""
     use_duckdb = HAS_DUCKDB and backend in ("duckdb", "auto") and str(db_path).endswith(".duckdb")
     if backend == "duckdb" and not HAS_DUCKDB:

@@ -9,8 +9,11 @@ Used by 03_modeling.py for walk-forward evaluation.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator
 from sklearn.preprocessing import StandardScaler
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
@@ -20,7 +23,7 @@ from src.modeling.features import clean_features
 
 def naive_1step(train_series: pd.Series) -> float:
     """Persistence baseline — predict last observed value."""
-    return train_series.iloc[-1]
+    return float(train_series.iloc[-1])
 
 
 def linear_trend_1step(train_series: pd.Series) -> float:
@@ -40,7 +43,7 @@ def holt_1step(train_series: pd.Series) -> float:
         )
         return float(m.forecast(1)[0])
     except Exception:
-        return train_series.iloc[-1]
+        return float(train_series.iloc[-1])
 
 
 def arima_1step(train_series: pd.Series) -> float:
@@ -49,17 +52,17 @@ def arima_1step(train_series: pd.Series) -> float:
         m = ARIMA(np.asarray(train_series.values), order=(1, 1, 1)).fit()
         return float(m.forecast(1)[0])
     except Exception:
-        return train_series.iloc[-1]
+        return float(train_series.iloc[-1])
 
 
 def ml_1step(
     train_df: pd.DataFrame,
     test_row: pd.Series,
-    model_cls,
+    model_cls: type[BaseEstimator],
     feature_cols: list[str],
     target: str,
     scaler: StandardScaler | None = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> float:
     """
     1-step ML prediction — robust to Inf/NaN via clean_features().
@@ -125,3 +128,25 @@ def damped_holt_strong_1step(ts: pd.Series) -> float:
         return float(m.forecast(1).iloc[0])
     except Exception:
         return float(ts.iloc[-1])
+
+
+def sarima_1step(ts: pd.Series) -> float:
+    """
+    SARIMA(1,1,1)(1,0,1,1) — seasonal ARIMA.
+    Kuwait's demand is cooling-load driven (Gulf-state AC demand) — a
+    seasonal AR component fits that physical pattern better than pure trend.
+    Falls back to ARIMA(1,1,1) if seasonal fit fails.
+    """
+    try:
+        from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+        m = SARIMAX(
+            ts.values,
+            order=(1, 1, 1),
+            seasonal_order=(1, 0, 1, 1),
+            enforce_stationarity=False,
+            enforce_invertibility=False,
+        ).fit(disp=False, maxiter=200)
+        return float(m.forecast(1).iloc[0])
+    except Exception:
+        return arima_1step(ts)

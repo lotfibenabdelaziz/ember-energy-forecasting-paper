@@ -13,6 +13,7 @@ Mirrors notebook 04_deeplearning_enhanced_patched.ipynb sections:
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -28,7 +29,7 @@ log = logging.getLogger(__name__)
 # ── Metrics ───────────────────────────────────────────────────────────────────
 
 
-def mape(y_true, y_pred) -> float:
+def mape(y_true: np.ndarray | pd.Series, y_pred: np.ndarray | pd.Series) -> float:
     """Mean Absolute Percentage Error (excludes zero actuals)."""
     yt, yp = np.array(y_true), np.array(y_pred)
     mask = yt != 0
@@ -37,12 +38,12 @@ def mape(y_true, y_pred) -> float:
     return float(np.mean(np.abs((yt[mask] - yp[mask]) / yt[mask])) * 100)
 
 
-def rmse(y_true, y_pred) -> float:
+def rmse(y_true: np.ndarray | pd.Series, y_pred: np.ndarray | pd.Series) -> float:
     """Root Mean Squared Error."""
     return float(np.sqrt(mean_squared_error(y_true, y_pred)))
 
 
-def smape(y_true, y_pred) -> float:
+def smape(y_true: np.ndarray | pd.Series, y_pred: np.ndarray | pd.Series) -> float:
     """Symmetric MAPE — bounded, robust to near-zero values."""
     yt, yp = np.array(y_true), np.array(y_pred)
     denom = (np.abs(yt) + np.abs(yp)) / 2
@@ -52,7 +53,7 @@ def smape(y_true, y_pred) -> float:
     return float(np.mean(np.abs(yt[mask] - yp[mask]) / denom[mask]) * 100)
 
 
-def mae(y_true, y_pred) -> float:
+def mae(y_true: np.ndarray | pd.Series, y_pred: np.ndarray | pd.Series) -> float:
     """Mean Absolute Error."""
     return float(mean_absolute_error(y_true, y_pred))
 
@@ -60,7 +61,9 @@ def mae(y_true, y_pred) -> float:
 # ── Single-step prediction ────────────────────────────────────────────────────
 
 
-def predict_one_step(model, X_window: np.ndarray, scaler_y, device: torch.device) -> float:
+def predict_one_step(
+    model: torch.nn.Module, X_window: np.ndarray, scaler_y: Any, device: torch.device
+) -> float:
     """
     Run one forward pass; inverse-transform the output.
     Mirrors notebook predict_one_step() exactly.
@@ -78,7 +81,7 @@ def predict_one_step(model, X_window: np.ndarray, scaler_y, device: torch.device
 def walk_forward_dl(
     country: str,
     df: pd.DataFrame,
-    model_cls,
+    model_cls: type[torch.nn.Module],
     model_kwargs: dict,
     feature_cols: list[str],
     target: str,

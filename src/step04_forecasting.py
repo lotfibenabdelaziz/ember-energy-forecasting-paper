@@ -197,7 +197,7 @@ def generate_all_forecasts(
                 log.warning("    Holt failed too: %s", e2)
                 from src.forecasting.forecasters import forecast_statistical
 
-                ts = hist_df[target].values.astype(float)
+                ts = hist_df[target].to_numpy(dtype=float)
                 fc = forecast_statistical(ts, "LinearTrend", horizon)
                 std = np.std(ts) * 0.10
                 lo = fc - 1.645 * std

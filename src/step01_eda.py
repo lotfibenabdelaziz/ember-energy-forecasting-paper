@@ -12,6 +12,7 @@ Writes:  outputs/eda/ember_filtered.csv
 import argparse
 import logging
 import os
+from typing import Any
 import warnings
 
 # ── Windows home/cache-dir fix — see src/config.py for full explanation ──────
@@ -72,14 +73,16 @@ plt.rcParams.update(
 )
 
 
-def savefig(fig, path: str) -> None:
+def savefig(fig: plt.Figure, path: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved → %s", path)
 
 
-def _boxplot_compat(ax, data, *, tick_labels=None, **kwargs):
+def _boxplot_compat(
+    ax: plt.Axes, data: list, *, tick_labels: list[str] | None = None, **kwargs: Any
+) -> dict:
     """
     matplotlib.Axes.boxplot()'s tick-label kwarg was renamed twice:
     `labels` (< 3.9) -> `tick_labels` (>= 3.9, `labels` deprecated) ->
@@ -91,7 +94,12 @@ def _boxplot_compat(ax, data, *, tick_labels=None, **kwargs):
     try:
         return ax.boxplot(data, tick_labels=tick_labels, **kwargs)
     except TypeError:
-        return ax.boxplot(data, labels=tick_labels, **kwargs)
+        # Older matplotlib (<3.9) only has `labels`, not `tick_labels` — this
+        # branch exists specifically for that case. mypy only has stubs for
+        # whichever matplotlib version is actually installed, so it can only
+        # validate one branch at a time; this is a deliberate runtime
+        # compatibility shim, not a real type error.
+        return ax.boxplot(data, labels=tick_labels, **kwargs)  # type: ignore[call-arg]
 
 
 # ── Load ──────────────────────────────────────────────────────────────────────
@@ -177,7 +185,10 @@ def plot_all_subcategories_grid(df_long: pd.DataFrame, fig_dir: str) -> None:
             # (including Demand) are genuinely single-valued per year;
             # mean is a safe no-op in those cases.
             agg_fn = "sum" if subcat == "Fuel" else "mean"
-            d = d.groupby("Year", as_index=False)["Value"].agg(agg_fn)
+            d = d.groupby("Year", as_index=False)["Value"].agg(agg_fn)  # type: ignore[assignment]
+            # pandas-stubs limitation: as_index=False + single-column selection
+            # returns a DataFrame at runtime (verified), stubs infer Series —
+            # same false positive as the sort_values cases in api/main.py.
             ax.plot(d["Year"], d["Value"], color=PALETTE[c], lw=1.5, marker="o", ms=2.5, label=c)
 
         ax.set_title(f"{title} — All Countries ({unit})", fontweight="bold", fontsize=10.5)
@@ -237,7 +248,7 @@ def plot_cagr_heatmap(df_demand: pd.DataFrame, fig_dir: str) -> None:
     rows = []
     for c in COUNTRIES:
         d = df_demand[df_demand["Area"] == c].set_index("Year")["Value"].sort_index()
-        row = {"Country": c}
+        row: dict[str, Any] = {"Country": c}
         for s, e in periods:
             try:
                 v_s = d.loc[s]

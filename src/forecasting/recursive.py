@@ -4,8 +4,11 @@ src/forecasting/recursive.py — Recursive ML forecast + residual computation
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator
 from sklearn.preprocessing import StandardScaler
 
 from src.forecasting.forecasters import clean_x, extrapolate_exog, forecast_statistical
@@ -18,6 +21,7 @@ STAT_MODELS = {
     "DampedHolt",
     "ARIMA(1,1,1)",
     "ARIMA_1_1_1",
+    "SARIMA",
     "Theta",
 }
 
@@ -30,7 +34,7 @@ def _build_future_row(
     all_feature_cols: list[str],
     target: str,
 ) -> dict[str, float]:
-    hist_demand = list(history_df[target].values.astype(float))
+    hist_demand = list(history_df[target].to_numpy(dtype=float))
     full_demand = hist_demand + list(demand_preds)
     n = len(full_demand)
     row: dict[str, float] = {}
@@ -55,7 +59,7 @@ def _build_future_row(
             row[k] = 0.0
 
     for col in exog_future:
-        hist_exog = list(history_df[col].values.astype(float))
+        hist_exog = list(history_df[col].to_numpy(dtype=float))
         full_exog = hist_exog + list(exog_future[col][: step + 1])
         n_ex = len(full_exog)
         for lag in [1, 2, 3]:
@@ -90,18 +94,18 @@ def _build_future_row(
 
 def forecast_ml_recursive(
     history_df: pd.DataFrame,
-    model_cls,
+    model_cls: type[BaseEstimator],
     all_feature_cols: list[str],
     exog_cols: list[str],
     horizon: int,
     target: str,
-    scaler=None,
-    **kwargs,
+    scaler: StandardScaler | None = None,
+    **kwargs: Any,
 ) -> np.ndarray:
     tr = history_df[all_feature_cols + [target]].copy()
     tr = tr[tr[target].notna()]
-    X_tr = clean_x(tr[all_feature_cols].values)
-    y_tr = tr[target].values.astype(float)
+    X_tr = clean_x(tr[all_feature_cols].to_numpy(dtype=float))
+    y_tr = tr[target].to_numpy(dtype=float)
     if len(X_tr) < 3:
         raise ValueError("Not enough training rows")
     if scaler:
@@ -123,16 +127,16 @@ def forecast_ml_recursive(
 
 
 def point_forecast(
-    history_df,
-    model_name,
-    all_feature_cols,
-    exog_cols,
-    params,
-    horizon,
-    target,
-    ml_cls_map,
+    history_df: pd.DataFrame,
+    model_name: str,
+    all_feature_cols: list[str],
+    exog_cols: list[str],
+    params: dict,
+    horizon: int,
+    target: str,
+    ml_cls_map: dict[str, tuple[type[BaseEstimator] | None, bool]],
 ) -> np.ndarray:
-    ts = history_df[target].values.astype(float)
+    ts = history_df[target].to_numpy(dtype=float)
     if model_name in STAT_MODELS:
         return forecast_statistical(ts, model_name, horizon)
     cls, needs_scaler = ml_cls_map[model_name]
@@ -149,14 +153,14 @@ def point_forecast(
 
 
 def get_insample_residuals(
-    history_df,
-    model_name,
-    all_feature_cols,
-    exog_cols,
-    params,
-    target,
-    ml_cls_map,
-    n_eval=8,
+    history_df: pd.DataFrame,
+    model_name: str,
+    all_feature_cols: list[str],
+    exog_cols: list[str],
+    params: dict,
+    target: str,
+    ml_cls_map: dict[str, tuple[type[BaseEstimator] | None, bool]],
+    n_eval: int = 8,
 ) -> np.ndarray:
     residuals = []
     n = len(history_df)

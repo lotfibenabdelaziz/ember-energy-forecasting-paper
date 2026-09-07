@@ -27,6 +27,8 @@ warehouse/*.db
 warehouse/*.duckdb
 htmlcov/
 coverage.xml
+.coverage
+mlflow.db
 .coveragerc.bak
 
 # ── Python ────────────────────────────────────────────────────────────────────
@@ -88,5 +90,5 @@ logs/
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 .pytest_cache/
-.mypy_cache/"" 
-.mplconfig/" 
+.mypy_cache/
+.mplconfig/

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -73,7 +74,7 @@ def load_model_ready(pre_dir: str) -> tuple[pd.DataFrame, dict]:
 
 def get_all_features(meta: dict) -> list[str]:
     """Extract the full engineered feature list from feature_meta.json."""
-    return meta["all_features"]
+    return cast(list[str], meta["all_features"])
 
 
 # ── Cleaning utility ──────────────────────────────────────────────────────────
@@ -118,7 +119,7 @@ class DemandDataset(Dataset):
     ) -> None:
         sub = df_country.sort_values("Year").reset_index(drop=True)
         X_raw = clean_arr(sub[feature_cols].values)
-        y_raw = sub[target].values.reshape(-1, 1).astype(np.float32)
+        y_raw = sub[target].to_numpy(dtype=np.float32).reshape(-1, 1)
 
         # Fit or apply scalers
         self.scaler_X = scaler_X or StandardScaler()
@@ -212,6 +213,9 @@ def safe_loader(dataset: Dataset, batch_size: int, shuffle: bool = False) -> Dat
     Cap batch_size to dataset length to prevent batch_size=1 crashes
     (LayerNorm/BatchNorm require >1 sample). Mirrors notebook _safe_loader().
     """
-    n = len(dataset)
+    # torch's Dataset stubs don't declare __len__ as required (map-style
+    # datasets implement it in practice, but the type isn't guaranteed) —
+    # every dataset actually passed here (DemandDataset, Subset) has one.
+    n = len(dataset)  # type: ignore[arg-type]
     bs = max(2, min(batch_size, n))
     return DataLoader(dataset, batch_size=bs, shuffle=shuffle, drop_last=False)

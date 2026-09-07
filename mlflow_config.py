@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import yaml
@@ -130,7 +131,7 @@ def log_classical_run(
             mlflow.log_metrics(
                 {k: round(float(v), 4) for k, v in metrics.items() if v is not None and v == v}
             )  # skip NaN
-            return run.info.run_id
+            return str(run.info.run_id)
     except Exception as e:
         log.warning("MLflow classical logging failed (%s %s): %s", country, model_name, e)
         return None
@@ -390,6 +391,7 @@ def compare_and_promote(
             return True
 
         prod_mv = prod_versions[0]
+        assert prod_mv.run_id is not None, "registered model version has no run_id"
         prod_run = client.get_run(prod_mv.run_id)
         prod_mape = prod_run.data.metrics.get("MAPE", float("inf"))
 
@@ -417,7 +419,7 @@ def compare_and_promote(
 def get_production_model(
     country: str,
     model_type: str = "classical",
-):
+) -> Any:
     """
     Load the Production model from the Registry for inference.
 
@@ -462,6 +464,7 @@ def list_registered_models(model_type: str | None = None) -> pd.DataFrame:
                 continue
             for mv in client.search_model_versions(f"name='{rm.name}'"):
                 try:
+                    assert mv.run_id is not None, "registered model version has no run_id"
                     run = client.get_run(mv.run_id)
                     mape = run.data.metrics.get("MAPE", None)
                     ctry = run.data.tags.get("country", "unknown")
@@ -482,7 +485,7 @@ def list_registered_models(model_type: str | None = None) -> pd.DataFrame:
                         "version": mv.version,
                         "stage": mv.current_stage,
                         "MAPE": round(mape, 3) if mape else None,
-                        "run_id": mv.run_id[:8],
+                        "run_id": mv.run_id[:8] if mv.run_id else "unknown",
                     }
                 )
 

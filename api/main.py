@@ -46,7 +46,8 @@ from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 import pandas as pd
 from pydantic import BaseModel
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
 
 from api.auth import (
     _admin_password,
@@ -182,7 +183,7 @@ _DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -269,7 +270,7 @@ def _is_finite(v: Any) -> bool:
 
 def _metrics_dict(row: pd.Series) -> dict[str, Any]:
     return {
-        k: round(float(v), 4)
+        str(k): round(float(v), 4)
         for k, v in row.items()
         if k not in ("Country", "Model") and _is_finite(v)
     }
@@ -292,7 +293,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 
 @app.get("/", include_in_schema=False)
-def root():
+def root() -> Response:
     from fastapi.responses import RedirectResponse
 
     return RedirectResponse(url="/static/index.html")
@@ -493,7 +494,11 @@ def get_subcategories_all() -> dict:
                 sub_df[sub_df["Area"] == country]
                 .groupby("Year", as_index=False)["Value"]
                 .mean()
-                .sort_values("Year")
+                .sort_values("Year")  # type: ignore[call-overload]
+                # pandas-stubs limitation: as_index=False + single-column
+                # selection returns a DataFrame at runtime (verified), but
+                # the stubs infer Series here, whose sort_values() has no
+                # `by` param — this is a false positive, not a real bug.
             )
             if c_sub.empty:
                 continue
@@ -517,7 +522,8 @@ def get_subcategories_all() -> dict:
                 fuel_df[fuel_df["Area"] == country]
                 .groupby("Year", as_index=False)["Value"]
                 .sum()
-                .sort_values("Year")
+                .sort_values("Year")  # type: ignore[call-overload]
+                # same pandas-stubs false positive as get_subcategories_all() above
             )
             if c_sub.empty:
                 continue
@@ -543,7 +549,7 @@ def get_summary_stats() -> dict:
 # to show a trend shift, not just one isolated year.
 CRISIS_PERIODS = {
     "2008 Financial Crisis": (2008, 2009),
-    "COVID-19 Pandemic":     (2020, 2021),
+    "COVID-19 Pandemic": (2020, 2021),
     "Ukraine War / Energy Crisis": (2022, 2023),
 }
 
@@ -574,12 +580,14 @@ def get_fuel_vs_demand(country: str) -> dict:
         if pd.isna(row["Demand"]) or pd.isna(row["Fuel"]):
             continue
         year = int(row["Year"])
-        points.append({
-            "year": year,
-            "demand": round(float(row["Demand"]), 3),
-            "fuel": round(float(row["Fuel"]), 3),
-            "period": _tag_crisis_period(year),
-        })
+        points.append(
+            {
+                "year": year,
+                "demand": round(float(row["Demand"]), 3),
+                "fuel": round(float(row["Fuel"]), 3),
+                "period": _tag_crisis_period(year),
+            }
+        )
 
     return {
         "country": country,
@@ -927,7 +935,7 @@ def _langchain_answer(question: str) -> str:
     from langchain_openai import ChatOpenAI
 
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    return llm.invoke(
+    content = llm.invoke(
         [
             SystemMessage(
                 content=(
@@ -937,6 +945,9 @@ def _langchain_answer(question: str) -> str:
             HumanMessage(content=question),
         ]
     ).content
+    # .content is typed str | list[str | dict] for multimodal support, but
+    # with plain-text-only messages (as used here) it's always a plain str.
+    return content if isinstance(content, str) else str(content)
 
 
 def _rule_based_answer(question: str) -> str:

@@ -62,8 +62,9 @@ def compute_robustness_score(
     rows = []
 
     for (country, model), grp in forecast_df.groupby(["Country", "Model"]):
+        country = str(country)
         grp = grp.sort_values("Year")
-        vals = grp["Forecast"].values.astype(float)
+        vals = grp["Forecast"].to_numpy(dtype=float)
         base = last_known.get(country)
 
         if base is None or base == 0 or len(vals) < 2:

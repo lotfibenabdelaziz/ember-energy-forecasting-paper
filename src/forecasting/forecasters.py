@@ -38,7 +38,9 @@ def forecast_statistical(series: np.ndarray, model_name: str, horizon: int) -> n
     if model_name in ("Naive", "Naïve", "LinearTrend"):
         X = np.arange(len(series)).reshape(-1, 1)
         m = LinearRegression().fit(X, series)
-        return m.predict(np.arange(len(series), len(series) + horizon).reshape(-1, 1)).flatten()
+        return np.asarray(
+            m.predict(np.arange(len(series), len(series) + horizon).reshape(-1, 1)).flatten()
+        )
     elif model_name == "Holt":
         m = ExponentialSmoothing(series, trend="add", damped_trend=True).fit(optimized=True)
         return np.array(m.forecast(horizon))
@@ -52,6 +54,21 @@ def forecast_statistical(series: np.ndarray, model_name: str, horizon: int) -> n
         pm = m.get_forecast(steps=horizon).predicted_mean
         # statsmodels >= 0.14 returns ndarray directly; older returns Series
         return np.array(pm)
+    elif model_name == "SARIMA":
+        try:
+            from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+            m = SARIMAX(
+                series,
+                order=(1, 1, 1),
+                seasonal_order=(1, 0, 1, 1),
+                enforce_stationarity=False,
+                enforce_invertibility=False,
+            ).fit(disp=False, maxiter=200)
+            return np.array(m.forecast(horizon))
+        except Exception:
+            m = ARIMA(series, order=(1, 1, 1)).fit()
+            return np.array(m.get_forecast(steps=horizon).predicted_mean)
     elif model_name == "Theta":
         try:
             from statsmodels.tsa.forecasting.theta import ThetaModel
@@ -74,8 +91,8 @@ def extrapolate_exog(
     preds: dict[str, np.ndarray] = {}
     n = len(history_df)
     for col in exog_cols:
-        y = history_df[col].values.astype(float)
-        y = np.where(np.isfinite(y), y, np.nanmedian(y))
+        y_raw = history_df[col].to_numpy(dtype=float)
+        y = np.where(np.isfinite(y_raw), y_raw, np.nanmedian(y_raw))
         last_val = y[-1]
         X = np.arange(n).reshape(-1, 1)
         try:
@@ -147,7 +164,7 @@ def bootstrap_forecast_ci(
     residuals = get_insample_residuals(
         history_df, model_name, all_feature_cols, exog_cols, params, target, ml_cls_map
     )
-    ts = history_df[target].values.astype(float)
+    ts = history_df[target].to_numpy(dtype=float)
     alpha = (100 - ci) / 2
 
     if len(residuals) < 3:
@@ -193,7 +210,7 @@ def bootstrap_forecast_ci(
     hi = np.maximum(raw_hi, base_fc)
 
     # Sanity check — if first-year deviation > 25% use LinearTrend fallback
-    ts = history_df[target].values.astype(float)
+    ts = history_df[target].to_numpy(dtype=float)
     last_known = ts[-1]
     if last_known != 0:
         deviation = abs(base_fc[0] - last_known) / abs(last_known)

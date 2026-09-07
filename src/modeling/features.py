@@ -28,6 +28,6 @@ def prepare_xy(
     """Return clean X, y arrays — drop rows where target is NaN."""
     sub = subset[[*feature_cols, target]].copy()
     sub = sub[sub[target].notna()]
-    X = clean_features(sub[feature_cols].values)
-    y = sub[target].values
+    X = clean_features(sub[feature_cols].to_numpy(dtype=float))
+    y = sub[target].to_numpy(dtype=float)
     return X, y

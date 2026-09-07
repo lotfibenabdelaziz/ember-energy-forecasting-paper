@@ -13,7 +13,7 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 
-def mape(y_true, y_pred) -> float:
+def mape(y_true: np.ndarray | pd.Series, y_pred: np.ndarray | pd.Series) -> float:
     """Mean Absolute Percentage Error (excludes zero actuals)."""
     yt, yp = np.array(y_true), np.array(y_pred)
     m = yt != 0
@@ -22,7 +22,7 @@ def mape(y_true, y_pred) -> float:
     return float(np.mean(np.abs((yt[m] - yp[m]) / yt[m])) * 100)
 
 
-def rmse(yt, yp) -> float:
+def rmse(yt: np.ndarray | pd.Series, yp: np.ndarray | pd.Series) -> float:
     """Root Mean Squared Error."""
     return float(np.sqrt(mean_squared_error(yt, yp)))
 

@@ -45,7 +45,10 @@ if os.name == "nt":
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
+yaml: ModuleType | None
 try:
     import yaml
 except ImportError:  # pragma: no cover — PyYAML is a core dependency; this
@@ -75,7 +78,7 @@ def _load_params() -> dict:
 _PARAMS = _load_params()
 
 
-def _yaml(path: str, default):
+def _yaml(path: str, default: Any) -> Any:
     """Dotted-path lookup into the loaded params.yaml, e.g. 'splits.train_end'."""
     node = _PARAMS
     for part in path.split("."):

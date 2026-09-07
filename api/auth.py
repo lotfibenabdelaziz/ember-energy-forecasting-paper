@@ -90,7 +90,7 @@ def create_access_token(
     now = datetime.now(timezone.utc)
     expire = now + (expires_delta or timedelta(minutes=_token_expire_minutes()))
     payload.update({"exp": expire, "iat": now})
-    return jwt.encode(payload, _secret_key(), algorithm=ALGORITHM)
+    return str(jwt.encode(payload, _secret_key(), algorithm=ALGORITHM))
 
 
 def decode_token(token: str) -> dict:
@@ -108,7 +108,7 @@ def decode_token(token: str) -> dict:
         )
     try:
         payload = jwt.decode(token, _secret_key(), algorithms=[ALGORITHM])
-        return payload
+        return dict(payload)
     except JWTError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

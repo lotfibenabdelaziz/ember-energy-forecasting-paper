@@ -218,7 +218,7 @@ def plot_check1_corr(corr_raw: pd.Series, fig_dir: str) -> None:
     """Mirrors notebook Cell 6."""
     fig, ax = plt.subplots(figsize=(8, 4))
     clrs = ["steelblue" if v >= 0 else "tomato" for v in corr_raw]
-    ax.barh(corr_raw.index, corr_raw.values, color=clrs)
+    ax.barh(corr_raw.index, corr_raw.to_numpy(), color=clrs)
     ax.axvline(0, color="black", lw=0.8)
     ax.set_title("Check 1 — Correlation with Demand (Raw)", fontweight="bold")
     for i, v in enumerate(corr_raw):
@@ -278,7 +278,8 @@ def impute_missing(df_wide: pd.DataFrame, all_subs: list[str], train_until: int)
 
         # ── Val/test/forecast segment: forward-fill from the past only,
         #    then fall back to the TRAIN-period mean (never a future value) ──
-        for area, g in df_wide[~is_train].groupby("Area"):
+        for raw_area, g in df_wide[~is_train].groupby("Area"):
+            area = str(raw_area)
             g_sorted = g.sort_values("Year")
             # Seed the ffill with the last known train-period value so the
             # first post-train row can still be forward-filled causally.
@@ -378,6 +379,7 @@ def fit_winsor_bounds(
     train_df = df_wide[df_wide["Year"] <= train_until]
     bounds: dict[str, dict[str, tuple[float, float]]] = {}
     for area, g in train_df.groupby("Area"):
+        area = str(area)
         bounds[area] = {}
         for col in cols:
             q1, q3 = g[col].quantile([0.25, 0.75])
@@ -441,7 +443,7 @@ def plot_check4_corr(corr_clean: pd.Series, fig_dir: str) -> None:
     """Mirrors notebook Cell 15 exactly."""
     fig, ax = plt.subplots(figsize=(8, 4))
     clrs = ["steelblue" if v >= 0 else "tomato" for v in corr_clean]
-    ax.barh(corr_clean.index, corr_clean.values, color=clrs)
+    ax.barh(corr_clean.index, corr_clean.to_numpy(), color=clrs)
     ax.axvline(0, color="black", lw=0.8)
     ax.set_title("Check 4 — Correlation with Demand (Post-Cleaning)", fontweight="bold")
     for i, v in enumerate(corr_clean):
@@ -538,7 +540,7 @@ def plot_check5_top_corr(corr_full: pd.Series, fig_dir: str) -> None:
     top25 = corr_full.head(25)
     fig, ax = plt.subplots(figsize=(10, 8))
     clrs = ["steelblue" if v >= 0 else "tomato" for v in top25.values]
-    ax.barh(top25.index[::-1], top25.values[::-1], color=clrs[::-1])
+    ax.barh(top25.index[::-1], top25.to_numpy()[::-1], color=clrs[::-1])
     ax.axvline(0, color="black", lw=0.8)
     ax.set_title(
         "Check 5 — Top 25 Features Correlated with Demand\n(all engineered features)",

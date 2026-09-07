@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import os as _os
 import sys as _sys
+from typing import Any
+
+from sklearn.base import BaseEstimator
 
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
@@ -42,7 +45,7 @@ STAT_MODELS = {"Naive", "Naïve", "LinearTrend", "Holt", "ARIMA_1_1_1", "ARIMA(1
 ML_MODELS = {"Ridge", "RandomForest", "XGBoost"}
 
 
-def _build_sklearn_model(model_name: str, best_hp: dict):
+def _build_sklearn_model(model_name: str, best_hp: dict) -> BaseEstimator:
     """Instantiate and return a fitted-ready sklearn model."""
     if model_name == "Ridge":
         from sklearn.linear_model import Ridge
@@ -130,7 +133,7 @@ def register_classical(
                     mlflow.log_params(best_hp.get(model_name, {}))
                 else:
                     # Statistical model params
-                    stat_params = {
+                    stat_params: dict[str, dict[str, Any]] = {
                         "Holt": {"trend": "add", "damped_trend": True},
                         "ARIMA_1_1_1": {"p": 1, "d": 1, "q": 1},
                         "ARIMA(1,1,1)": {"p": 1, "d": 1, "q": 1},

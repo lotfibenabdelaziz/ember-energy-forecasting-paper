@@ -12,6 +12,7 @@ Mirrors notebook 04_deeplearning_enhanced_patched.ipynb Section 10:
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -26,13 +27,13 @@ log = logging.getLogger(__name__)
 
 
 def recursive_forecast(
-    model,
+    model: torch.nn.Module,
     df_country: pd.DataFrame,
     feature_cols: list[str],
     target: str,
     seq_len: int,
-    scaler_X,
-    scaler_y,
+    scaler_X: Any,
+    scaler_y: Any,
     forecast_years: list[int],
     device: torch.device,
 ) -> pd.DataFrame:
@@ -131,13 +132,13 @@ def recursive_forecast_all_countries(
 
 
 def bootstrap_ci(
-    model,
+    model: torch.nn.Module,
     df_country: pd.DataFrame,
     feature_cols: list[str],
     target: str,
     seq_len: int,
-    scaler_X,
-    scaler_y,
+    scaler_X: Any,
+    scaler_y: Any,
     forecast_years: list[int],
     device: torch.device,
     residuals: np.ndarray,

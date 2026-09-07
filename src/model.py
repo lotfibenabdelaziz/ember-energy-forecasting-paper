@@ -14,6 +14,8 @@ Each model: input [B, seq_len, n_features] → output [B, 1]
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F  # noqa: N812
@@ -64,7 +66,7 @@ class MLPForecaster(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: [B, seq_len, n_features]
-        return self.net(x.flatten(1))
+        return cast(torch.Tensor, self.net(x.flatten(1)))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -84,7 +86,7 @@ class CausalConv1d(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = F.pad(x, (self.padding, 0))
-        return self.conv(x)
+        return cast(torch.Tensor, self.conv(x))
 
 
 class TCNBlock(nn.Module):
@@ -108,7 +110,7 @@ class TCNBlock(nn.Module):
         out = self.drop(out)
         out = self.relu(self.bn2(self.conv2(out)))
         out = self.drop(out)
-        return self.relu(out + res)
+        return cast(torch.Tensor, self.relu(out + res))
 
 
 class TCNForecaster(nn.Module):
@@ -142,7 +144,7 @@ class TCNForecaster(nn.Module):
         x = x.transpose(1, 2)
         x = self.tcn(x)  # [B, n_channels, seq_len]
         x = x[:, :, -1]  # last timestep
-        return self.linear(x)
+        return cast(torch.Tensor, self.linear(x))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -275,7 +277,7 @@ class NBeatsForecaster(nn.Module):
         _, forecast2 = self.generic_block(x_res, self.backcast_t, self.forecast_t)
 
         # Sum forecasts -> [B, horizon, 1]
-        return (forecast1 + forecast2).unsqueeze(-1)
+        return cast(torch.Tensor, (forecast1 + forecast2).unsqueeze(-1))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -306,7 +308,7 @@ class GatedResidualNetwork(nn.Module):
         h = x if context is None else torch.cat([x, context], dim=-1)
         h = F.elu(self.fc1(h))
         h = self.drop(self.gate(self.fc2(h)))
-        return self.norm(h + self.skip(x))
+        return cast(torch.Tensor, self.norm(h + self.skip(x)))
 
 
 class VariableSelectionNetwork(nn.Module):
@@ -365,7 +367,7 @@ class TFTForecaster(nn.Module):
         attn_out, weights = self.attn(enc, enc, enc, need_weights=True)
         self._weights = weights.detach().cpu()  # store for interpretability
         out = self.grn(self.norm(attn_out + enc))
-        return self.head(out[:, -1, :])  # last timestep
+        return cast(torch.Tensor, self.head(out[:, -1, :]))  # last timestep
 
     def get_attention_weights(self) -> torch.Tensor | None:
         return self._weights

@@ -17,6 +17,7 @@ Exports all pipeline figures in IEEE paper format:
 """
 
 import os
+from typing import cast
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -52,7 +53,7 @@ COUNTRIES = ["Tunisia", "Austria", "Germany", "Egypt", "Canada", "France", "Kuwa
 COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"]
 
 
-def fig1_demand_history():
+def fig1_demand_history() -> None:
     """Figure 1: Historical demand 2000-2024 per country (double column)."""
     df = pd.read_csv("outputs/preprocessing/ember_model_ready.csv")
     fig, axes = plt.subplots(2, 4, figsize=(IEEE_DOUBLE_COL, 4.5), sharey=False)
@@ -76,7 +77,7 @@ def fig1_demand_history():
     print("✓ fig1_demand_history.pdf")
 
 
-def fig2_mape_heatmap():
+def fig2_mape_heatmap() -> None:
     """Figure 2: MAPE heatmap all models X all countries (single column)."""
     df = pd.read_csv("outputs/modeling/test_benchmarking.csv")
     pivot = df.pivot(index="Country", columns="Model", values="MAPE").round(2)
@@ -101,7 +102,7 @@ def fig2_mape_heatmap():
     print("✓ fig2_mape_heatmap.pdf")
 
 
-def fig3_forecast_comparison():
+def fig3_forecast_comparison() -> None:
     """Figure 3: Classical vs DL forecast 2025-2030 (double column)."""
     fc_cl = pd.read_csv("outputs/forecasting/demand_forecast_2025_2030.csv")
     fc_dl = pd.read_csv("outputs/deeplearning/dl_forecast_2025_2030.csv")
@@ -160,7 +161,7 @@ def fig3_forecast_comparison():
     print("✓ fig3_forecast_comparison.pdf")
 
 
-def fig4_cagr_bar():
+def fig4_cagr_bar() -> None:
     """Figure 4: CAGR 2024-2030 bar chart (single column)."""
     df = pd.read_csv("outputs/forecasting/demand_growth_summary.csv")
     fig, ax = plt.subplots(figsize=(IEEE_SINGLE_COL, 2.8))
@@ -186,7 +187,7 @@ def fig4_cagr_bar():
     print("✓ fig4_cagr_bar.pdf")
 
 
-def fig5_classical_vs_dl_scatter():
+def fig5_classical_vs_dl_scatter() -> None:
     """Figure 5: Classical vs DL MAPE scatter (single column)."""
     cl = pd.read_csv("outputs/modeling/test_benchmarking.csv")
     dl = pd.read_csv("outputs/deeplearning/dl_benchmarking.csv")
@@ -202,7 +203,11 @@ def fig5_classical_vs_dl_scatter():
     fig, ax = plt.subplots(figsize=(IEEE_SINGLE_COL, 3.0))
     for i, row in merged.iterrows():
         ax.scatter(
-            row["Classic_MAPE"], row["DL_MAPE"], color=COLORS[i % len(COLORS)], s=60, zorder=3
+            row["Classic_MAPE"],
+            row["DL_MAPE"],
+            color=COLORS[cast(int, i) % len(COLORS)],
+            s=60,
+            zorder=3,
         )
         ax.annotate(
             row["Country"],

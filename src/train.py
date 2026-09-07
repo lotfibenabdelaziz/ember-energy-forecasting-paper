@@ -85,7 +85,9 @@ def train_model(
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             tr_loss += loss.item() * len(X_b)
-        tr_loss /= max(len(loader_tr.dataset), 1)
+        # DataLoader.dataset is typed as Dataset, whose stubs don't declare
+        # __len__ as required — every dataset actually used here does.
+        tr_loss /= max(len(loader_tr.dataset), 1)  # type: ignore[arg-type]
 
         # ── Validate ───────────────────────────────────────────────────
         model.eval()
@@ -96,7 +98,11 @@ def train_model(
                 pred = model(X_b).squeeze(-1)
                 v_loss += criterion(pred, y_b).item() * len(X_b)
 
-        n_val = len(loader_val.dataset) if len(loader_val.dataset) > 0 else 1
+        n_val = (
+            len(loader_val.dataset)  # type: ignore[arg-type]
+            if len(loader_val.dataset) > 0  # type: ignore[arg-type]
+            else 1
+        )
         v_loss = v_loss / n_val if n_val > 0 else tr_loss
 
         tr_losses.append(tr_loss)
