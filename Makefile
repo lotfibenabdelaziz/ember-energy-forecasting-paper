@@ -27,12 +27,19 @@ UV ?= uv
 ifeq ($(ENV_MANAGER),uv)
   # RUN prefixes any tool invocation so it resolves inside the uv-managed venv,
   # never whatever happens to be first on PATH (conda, system python, etc.)
-  RUN     := $(UV) run
-  PYTHON  := $(UV) run python
+  RUN         := $(UV) run
+  PYTHON      := $(UV) run python
+  # uv-managed venvs do NOT ship a real `pip` binary inside them by design —
+  # "$(RUN) pip install" (uv run pip) can't find one locally and silently
+  # falls through to whatever pip is on the system PATH (this was a real bug:
+  # it was installing into global user site-packages, not .venv). uv's own
+  # "pip install" subcommand is the correct, venv-safe equivalent.
+  PIP_INSTALL := $(UV) pip install
 else ifeq ($(ENV_MANAGER),conda)
   # --no-capture-output keeps live output (progress bars, streaming logs) intact
-  RUN     := conda run -n $(CONDA_ENV_NAME) --no-capture-output
-  PYTHON  := conda run -n $(CONDA_ENV_NAME) --no-capture-output python
+  RUN         := conda run -n $(CONDA_ENV_NAME) --no-capture-output
+  PYTHON      := conda run -n $(CONDA_ENV_NAME) --no-capture-output python
+  PIP_INSTALL := conda run -n $(CONDA_ENV_NAME) --no-capture-output pip install
 else
   $(error Unsupported ENV_MANAGER "$(ENV_MANAGER)" — must be "uv" or "conda")
 endif
@@ -228,12 +235,12 @@ install-conda:
 
 api-install:
 	@echo "── [api-install] Installing API + dev extras…"
-	$(RUN) pip install -e ".[api,langchain,dev]"
+	$(PIP_INSTALL) -e ".[api,langchain,dev]"
 	@echo "✓  API dependencies installed."
 
 staging-install:
 	@echo "── [staging-install] Installing optional DuckDB backend for src/staging.py…"
-	$(RUN) pip install -e ".[staging]"
+	$(PIP_INSTALL) -e ".[staging]"
 	@echo "✓  Staging (DuckDB) dependencies installed. SQLite backend needs nothing extra."
 
 # =============================================================================
